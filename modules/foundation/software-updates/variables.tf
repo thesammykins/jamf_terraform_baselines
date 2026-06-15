@@ -90,6 +90,14 @@ variable "exemptions" {
   }))
   default     = {}
   description = "Foundation module exemptions with audit justification"
+
+  validation {
+    condition = alltrue([
+      for k, v in var.exemptions :
+      contains(["ACCEPTED", "TEMPORARY", "ACCEPTED_WITH_COMPENSATING_CONTROLS", "UNDER_REVIEW"], v.risk_status)
+    ])
+    error_message = "risk_status must be one of: ACCEPTED, TEMPORARY, ACCEPTED_WITH_COMPENSATING_CONTROLS, UNDER_REVIEW"
+  }
 }
 
 variable "module_name" {

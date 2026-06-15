@@ -14,3 +14,14 @@ output "legacy_profile_id" {
   value       = one(jamfpro_macos_configuration_profile_plist.software_update_legacy[*].id)
   description = "Jamf Pro ID of the deprecated legacy software update configuration profile"
 }
+
+
+output "exemptions" {
+  value = {
+    for k, v in var.exemptions : k => merge(v, {
+      module    = var.module_name
+      timestamp = timestamp()
+    })
+  }
+  description = "Active exemptions with audit justification"
+}
