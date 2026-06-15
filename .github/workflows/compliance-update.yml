@@ -2,7 +2,7 @@ name: Compliance Baseline Update
 
 on:
   schedule:
-    - cron: '0 6 * * 1'           # Weekly Monday 06:00 UTC
+    - cron: '0 6 1 */3 *'          # Quarterly on the 1st of Jan/Apr/Jul/Oct 06:00 UTC
   workflow_dispatch:
     inputs:
       mscp_branch:

@@ -52,6 +52,8 @@ Each generated benchmark resource references the exact mSCP branch + revision, t
 | `cnssi-1253_low` | CNSSI 1253 | Low |
 | `nlmapgov_base` | Netherlands BIO | Base |
 | `nlmapgov_plus` | Netherlands BIO | Plus |
+| `hicp_lp` | HICP Large Healthcare Organizations | — |
+
 
 #### Industry & International
 
@@ -235,7 +237,7 @@ If an exemption has `expires` set and the current date is past it, the CI pipeli
 
 ### CI Pipeline
 
-- Runs on schedule (weekly) + on-demand (`workflow_dispatch`)
+- Runs on schedule (quarterly) + on-demand (`workflow_dispatch`)
 - Two independent update paths:
   - **Variant A**: Polls mSCP releases API for new tags. On new release, regenerates compliance modules and opens PR.
   - **Variant B**: Polls for PPPC bundle ID updates, provider version bumps. Updates monthly.
