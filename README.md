@@ -4,6 +4,8 @@
 
 Terraform modules for deploying NIST mSCP compliance baselines and macAdmin foundation scaffolding into Jamf Pro. 16 compliance frameworks × 3 macOS versions — all kept current via CI.
 
+> **AI-assisted development** — This project was built with the assistance of AI agents. Every module, spec, and pipeline has been human-reviewed and validated through `terraform validate` against the upstream provider schemas. The rubber duck was occasionally silicon-based.
+
 ## Prerequisites
 
 - **Terraform** ≥ 1.9
@@ -218,6 +220,22 @@ You can also trigger compliance and foundation updates manually via `workflow_di
 | [specs/mscp-terraform-pipeline/PRODUCT.md](specs/mscp-terraform-pipeline/PRODUCT.md) | Full product spec — all baselines, exemption system, success criteria |
 | [specs/mscp-terraform-pipeline/TECH.md](specs/mscp-terraform-pipeline/TECH.md) | Architecture — generator logic, CI design, key decisions |
 | [LICENSE](LICENSE) | Apache 2.0 |
+
+## Disclaimer
+
+This software is provided "as is", without warranty of any kind, express or implied, including but not limited to the warranties of merchantability, fitness for a particular purpose, and non-infringement. In no event shall the contributors be liable for any claim, damages, or other liability arising from the use or deployment of these Terraform modules.
+
+**You are responsible for:**
+- Reviewing every `terraform plan` before applying changes.
+- Testing modules in a non-production environment first.
+- Understanding what each module does before enabling it in your tenant.
+- Maintaining your own backups and rollback strategy.
+
+These modules interact with your Jamf Pro instance — a misconfigured baseline or an accidental destroy can disrupt managed devices. Start with `MONITOR` mode, read the migration guide, and don't apply blindly.
+
+---
+
+*To be perfectly honest, I'm not entirely sure this repo needed to exist — the compliance modules are auto-generated from upstream NIST data and the foundation modules are pretty basic Jamf scaffolding. But `modules/foundation/` is open for meaningful contributions: baseline configurations, real-world policy bundles, or whatever collective Jamf admin wisdom ends up here. PRs welcome.*
 
 ## License
 
