@@ -1,10 +1,9 @@
 name: CI/CD Validation
 
-# Runs on every push/PR to main. Fork maintainers: add any other branches
-# you want protected, or extend validation to additional example configs.
+# Runs on every PR to main. Branch protection on main prevents direct pushes.
+# Fork maintainers: add any other branches you want protected, or extend
+# validation to additional example configs.
 on:
-  push:
-    branches: [ main ]
   pull_request:
     branches: [ main ]
 

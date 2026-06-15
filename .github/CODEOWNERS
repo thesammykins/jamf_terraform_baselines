@@ -1,0 +1,18 @@
+# Each line is a file pattern followed by one or more owners.
+# Order matters: the last matching pattern takes precedence.
+# More info: https://docs.github.com/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything
+* @thesammykins
+
+# CI/CD pipeline changes need extra care
+.github/ @thesammykins
+
+# Generator scripts and core pipeline logic
+scripts/ @thesammykins
+
+# Project specs (product, tech, repo docs)
+specs/ @thesammykins
+
+# Testing infrastructure
+tests/ @thesammykins
