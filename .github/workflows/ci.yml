@@ -46,19 +46,19 @@ jobs:
       - name: Verify Terraform Formatting
         run: terraform fmt -check -recursive
 
-      - name: Validate Example: Compliance Only
+      - name: "Validate Example: Compliance Only"
         run: |
           cd examples/compliance-only
           terraform init -backend=false
           terraform validate
 
-      - name: Validate Example: Foundation Only
+      - name: "Validate Example: Foundation Only"
         run: |
           cd examples/foundation-only
           terraform init -backend=false
           terraform validate
 
-      - name: Validate Example: Full Stack
+      - name: "Validate Example: Full Stack"
         run: |
           cd examples/full-stack
           terraform init -backend=false
