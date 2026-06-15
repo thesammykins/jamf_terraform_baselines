@@ -1,6 +1,11 @@
 name: Exemption Validation
 
-on: [push, pull_request]
+# Disabled by default upstream (intended as a template repo). Fork
+# maintainers: add push/PR triggers here to enforce exemption hygiene
+# on your own branches.
+on:
+  workflow_dispatch:
+    description: 'Check exemption expiry dates and completeness across all modules'
 
 permissions:
   contents: read

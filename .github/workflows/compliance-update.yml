@@ -1,5 +1,8 @@
 name: Compliance Baseline Update
 
+# Fork maintainers: enable this by adding push/PR triggers if you want
+# automatic compliance module regeneration. The schedule and dispatch
+# keep it opt-in in the upstream repo.
 on:
   schedule:
     - cron: '0 6 1 */3 *'          # Quarterly on the 1st of Jan/Apr/Jul/Oct 06:00 UTC

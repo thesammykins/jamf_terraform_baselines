@@ -1,5 +1,7 @@
 name: CI/CD Validation
 
+# Runs on every push/PR to main. Fork maintainers: add any other branches
+# you want protected, or extend validation to additional example configs.
 on:
   push:
     branches: [ main ]
@@ -63,3 +65,10 @@ jobs:
           cd examples/full-stack
           terraform init -backend=false
           terraform validate
+
+      - name: Validate individual foundation modules
+        run: |
+          for dir in modules/foundation/*/; do
+            echo "Validating $dir"
+            (cd "$dir" && terraform init -backend=false && terraform validate)
+          done
