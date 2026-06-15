@@ -34,8 +34,8 @@ resource "jamfplatform_device_group" "this" {
 # Benchmark resource — pending upstream baseline definition
 # ---------------------------------------------------------------------------
 resource "jamfplatform_cbengine_benchmark" "this" {
-  title       = var.baseline_display_name
-  description = "${var.baseline_display_name} — mSCP ${var.mscp_branch} @ ${var.mscp_revision} — Managed by Terraform"
+  title              = var.baseline_display_name
+  description        = "${var.baseline_display_name} — mSCP ${var.mscp_branch} @ ${var.mscp_revision} — Managed by Terraform"
   source_baseline_id = var.baseline_id
 
   sources = []
