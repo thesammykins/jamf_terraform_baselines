@@ -5,3 +5,14 @@ output "smart_group_ids" {
   }
   description = "Map of smart group names to their Jamf Pro IDs"
 }
+
+
+output "exemptions" {
+  value = {
+    for k, v in var.exemptions : k => merge(v, {
+      module    = var.module_name
+      timestamp = timestamp()
+    })
+  }
+  description = "Active exemptions with audit justification"
+}

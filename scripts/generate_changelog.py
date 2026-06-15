@@ -33,12 +33,21 @@ try:
         resolve_rules_dir,
     )
 except ImportError:
-    print(
-        "Error: could not import generate_tf_compliance. "
-        "Ensure both scripts are in the same directory.",
-        file=sys.stderr,
-    )
-    sys.exit(1)
+    try:
+        from scripts.generate_tf_compliance import (
+            SUPPORTED_BASELINES,
+            SUPPORTED_VERSIONS,
+            parse_baseline_yaml,
+            resolve_baselines_dir,
+            resolve_rules_dir,
+        )
+    except ImportError:
+        print(
+            "Error: could not import generate_tf_compliance. "
+            "Ensure both scripts are in the same directory.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 
 # ---------------------------------------------------------------------------

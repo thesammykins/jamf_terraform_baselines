@@ -112,73 +112,44 @@ def extract_module_name(file_path: Path) -> str:
 
 
 def parse_exemptions(content: str) -> Dict[str, Dict[str, Optional[str]]]:
-    """Parse exemption blocks from a ``variables.tf`` file's content.
+    try:
+        import hcl2
+        data = hcl2.loads(content)
+    except Exception as e:
+        import sys
+        print(f"Error parsing HCL: {e}", file=sys.stderr)
+        return {}
 
-    Extracts exemption entries from the variable ``exemptions`` default
-    value. Each entry has keys: reason, ticket, risk_status, reviewer,
-    expires, review_date.
+    variables = data.get("variable", [])
+    for var_block in variables:
+        for var_name, var_def in var_block.items():
+            if var_name.strip('"') == "exemptions":
+                default_val = var_def.get("default", {})
+                if not isinstance(default_val, dict):
+                    return {}
+                
+                parsed = {}
+                for ex_key, ex_data in default_val.items():
+                    if not isinstance(ex_data, dict):
+                        continue
+                    def _get_str(k):
+                        v = ex_data.get(k)
+                        if isinstance(v, list) and len(v) == 1:
+                            v = v[0]
+                        return str(v).strip('"') if v is not None else None
 
-    Args:
-        content: Full text content of a ``variables.tf`` file.
+                    parsed[ex_key.strip('"')] = {
+                        "reason": _get_str("reason"),
+                        "ticket": _get_str("ticket"),
+                        "risk_status": _get_str("risk_status"),
+                        "reviewer": _get_str("reviewer"),
+                        "expires": _get_str("expires"),
+                        "review_date": _get_str("review_date"),
+                    }
+                return parsed
+    return {}
 
-    Returns:
-        Dict mapping exemption key → field dict.
-    """
-    exemptions: Dict[str, Dict[str, Optional[str]]] = {}
 
-    # Find the exemptions variable block
-    exemptions_start = content.find('variable "exemptions"')
-    if exemptions_start == -1:
-        return exemptions
-
-    # Find the default block within this variable
-    default_start = content.find("default", exemptions_start)
-    if default_start == -1:
-        return exemptions
-
-    # Find the opening brace of the default value
-    default_brace = content.find("{", default_start)
-    if default_brace == -1:
-        return exemptions
-
-    # Extract the region around exemptions to parse
-    block = content[default_brace:]
-
-    # Find exemption entries: "key" = { ... }
-    for match in _EXEMPTION_KEY_RE.finditer(block):
-        key = match.group(1)
-        # Extract the block for this exemption entry
-        block_start = match.end()
-        depth = 1
-        pos = block_start
-        while pos < len(block) and depth > 0:
-            if block[pos] == "{":
-                depth += 1
-            elif block[pos] == "}":
-                depth -= 1
-            pos += 1
-
-        entry_block = block[block_start:pos]
-
-        reason_match = _REASON_RE.search(entry_block)
-        ticket_match = _TICKET_RE.search(entry_block)
-        risk_match = _RISK_STATUS_RE.search(entry_block)
-        reviewer_match = _REVIEWER_RE.search(entry_block)
-        expires_match = _EXPIRES_RE.search(entry_block)
-        review_date_match = _REVIEW_DATE_RE.search(entry_block)
-
-        exemptions[key] = {
-            "reason": reason_match.group(1) if reason_match else None,
-            "ticket": ticket_match.group(1) if ticket_match else None,
-            "risk_status": risk_match.group(1) if risk_match else None,
-            "reviewer": reviewer_match.group(1) if reviewer_match else None,
-            "expires": expires_match.group(1) if expires_match else None,
-            "review_date": (
-                review_date_match.group(1) if review_date_match else None
-            ),
-        }
-
-    return exemptions
 
 
 # ---------------------------------------------------------------------------
@@ -379,6 +350,13 @@ def check_exemptions(
                     has_errors = True
                 else:
                     print(f"WARNING: {msg}", file=sys.stderr)
+
+
+            # Check risk status
+            if ex_data["risk_status"] not in VALID_RISK_STATUSES:
+                msg = f"INVALID RISK STATUS: {ex_data['risk_status']} in {module_name} for rule {ex_key}"
+                print(f"ERROR: {msg}", file=sys.stderr)
+                has_errors = True
 
             # Check ticket presence
             if require_ticket and not ex_data.get("ticket"):
