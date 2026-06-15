@@ -85,9 +85,9 @@ Foundation modules are designed to be individually enabled/disabled, so you can 
 
 ## Pattern: export → map → import
 
-For bulk migration, follow this pattern:
+For bulk migration, follow this pattern. If you want a head start on the export step, **[jamformer](https://github.com/Jamf-Concepts/jamformer)** is a CLI tool from Jamf that discovers resources in your Jamf instance and generates Terraform HCL with import blocks. Treat its output as a first draft — it gives you an accurate resource inventory to refine and harden into production IaC.
 
-1. **Export** your existing Jamf Pro configuration as JSON using the Jamf Pro API or Classic API.
+1. **Export** your existing Jamf Pro configuration. You can use the Jamf Pro API / Classic API to pull JSON, or use [jamformer](https://github.com/Jamf-Concepts/jamformer): `./jamformer -url https://yourinstance.jamfcloud.com` to auto-discover resources and generate Terraform scaffolding.
 2. **Map** each JSON object to the Terraform resource type it corresponds to:
    - Configuration profiles → `jamfpro_macos_configuration_profile_plist`
    - Categories → `jamfpro_category`
@@ -117,6 +117,7 @@ Compliance modules create Jamf Platform Compliance Benchmark Engine resources. T
 
 ## Getting help
 
+- [jamformer](https://github.com/Jamf-Concepts/jamformer) — auto-discover and export your existing Jamf instance as Terraform scaffolding
 - Check the [full-stack example](../examples/full-stack/) for a complete working configuration
 - Read the [PRODUCT.md spec](../specs/mscp-terraform-pipeline/PRODUCT.md) for detailed behavior descriptions
 - Open an issue on the repository with your specific scenario

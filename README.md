@@ -119,7 +119,7 @@ See **[docs/MIGRATION.md](docs/MIGRATION.md)** for a step-by-step guide covering
 - Using `terraform plan` to validate before applying
 - Handling naming conflicts with existing resources
 
-The short version: start by deploying the foundation modules in a dry-run, review what `terraform plan` says it would create, then selectively import or adopt resources.
+The short version: start by deploying the foundation modules in a dry-run, review what `terraform plan` says it would create, then selectively import or adopt resources. [jamformer](https://github.com/Jamf-Concepts/jamformer) can help you discover and export your existing Jamf configuration as Terraform scaffolding.
 
 ## Module reference
 
