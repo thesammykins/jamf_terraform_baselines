@@ -33,6 +33,7 @@ import argparse
 import json
 import re
 import sys
+from dataclasses import dataclass
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -54,7 +55,6 @@ _RISK_STATUS_RE = re.compile(r'risk_status\s*=\s*"([^"]*)"')
 _REVIEWER_RE = re.compile(r'reviewer\s*=\s*"([^"]*)"')
 _EXPIRES_RE = re.compile(r'expires\s*=\s*"([^"]*)"')
 _REVIEW_DATE_RE = re.compile(r'review_date\s*=\s*"([^"]*)"')
-_MODULE_NAME_RE = re.compile(r'default\s*=\s*"([^"]*)"')
 
 VALID_RISK_STATUSES = {
     "ACCEPTED",
@@ -62,6 +62,15 @@ VALID_RISK_STATUSES = {
     "ACCEPTED_WITH_COMPENSATING_CONTROLS",
     "UNDER_REVIEW",
 }
+
+
+@dataclass
+class ExemptionResult:
+    """Represents the result of validating a single exemption."""
+    rule_id: str
+    module: str
+    result_type: str  # EXPIRED, WARNING, ERROR, OK
+    message: str
 
 
 # ---------------------------------------------------------------------------
@@ -98,8 +107,8 @@ def extract_module_name(file_path: Path) -> str:
     try:
         modules_idx = parts.index("modules")
         return "/".join(parts[modules_idx + 1 : -1])
-    except (ValueError, IndexError):
-        return str(file_path.parent)
+    except ValueError:
+        return file_path.parent.name
 
 
 def parse_exemptions(content: str) -> Dict[str, Dict[str, Optional[str]]]:
@@ -133,7 +142,6 @@ def parse_exemptions(content: str) -> Dict[str, Dict[str, Optional[str]]]:
         return exemptions
 
     # Extract the region around exemptions to parse
-    # We'll scan for key="value" patterns
     block = content[default_brace:]
 
     # Find exemption entries: "key" = { ... }
@@ -193,6 +201,122 @@ def parse_date(date_str: Optional[str]) -> Optional[date]:
         return date.fromisoformat(date_str)
     except (ValueError, TypeError):
         return None
+
+
+def is_exemption_expired(ex_data: Dict[str, Any], today: Optional[date] = None) -> bool:
+    """Check if an exemption's expires date is in the past.
+
+    Args:
+        ex_data: Exemption dictionary.
+        today: Current date override.
+
+    Returns:
+        True if the exemption has a valid expires date that is before today.
+    """
+    if today is None:
+        today = date.today()
+    expires_str = ex_data.get("expires")
+    if not expires_str:
+        return False
+    expires_date = parse_date(expires_str)
+    if expires_date is None:
+        return False  # Malformed date fails safe
+    return expires_date < today
+
+
+def check_exemption_completeness(
+    ex_data: Dict[str, Any],
+    require_ticket: bool = False,
+    warn_missing_reviewer: bool = False,
+) -> List[str]:
+    """Check for completeness of exemption fields.
+
+    Args:
+        ex_data: Exemption dictionary.
+        require_ticket: If True, warn on missing ticket.
+        warn_missing_reviewer: If True, warn on missing reviewer.
+
+    Returns:
+        List of warning/error messages.
+    """
+    issues: List[str] = []
+    reason = ex_data.get("reason")
+    if not reason or reason.strip() == "":
+        issues.append("Missing reason")
+    if require_ticket and not ex_data.get("ticket"):
+        issues.append("Missing ticket")
+    if warn_missing_reviewer and not ex_data.get("reviewer"):
+        issues.append("Missing reviewer")
+    return issues
+
+
+def validate_exemptions(
+    exemptions: Dict[str, Dict[str, Any]],
+    enforce_expiry: bool = False,
+    require_ticket: bool = False,
+    warn_missing_reviewer: bool = False,
+    today: Optional[date] = None,
+) -> List[ExemptionResult]:
+    """Validate a dictionary of exemptions.
+
+    Args:
+        exemptions: Dict of rule_id -> exemption dict.
+        enforce_expiry: If True, flag expired as errors/warnings.
+        require_ticket: Validate ticket presence.
+        warn_missing_reviewer: Validate reviewer presence.
+        today: Override today's date.
+
+    Returns:
+        List of ExemptionResult items.
+    """
+    if today is None:
+        today = date.today()
+    results: List[ExemptionResult] = []
+    for rule_id, ex_data in exemptions.items():
+        if is_exemption_expired(ex_data, today):
+            results.append(
+                ExemptionResult(
+                    rule_id=rule_id,
+                    module="",
+                    result_type="EXPIRED" if enforce_expiry else "WARNING",
+                    message=f"Exemption expired on {ex_data.get('expires')}",
+                )
+            )
+        issues = check_exemption_completeness(
+            ex_data, require_ticket, warn_missing_reviewer
+        )
+        for issue in issues:
+            results.append(
+                ExemptionResult(
+                    rule_id=rule_id,
+                    module="",
+                    result_type="WARNING",
+                    message=issue,
+                )
+            )
+    return results
+
+
+def parse_exemptions_from_modules(
+    modules_exemptions: Dict[str, Dict[str, Any]]
+) -> Dict[str, Dict[str, Any]]:
+    """Parse and return exemptions from a raw modules input."""
+    return modules_exemptions
+
+
+def generate_exemption_report(
+    modules_exemptions: Dict[str, Dict[str, Any]]
+) -> str:
+    """Generate a GRC-consumable JSON exemption report string."""
+    report: Dict[str, Any] = {}
+    timestamp_str = datetime.utcnow().isoformat() + "Z"
+    for module_name, exemptions in modules_exemptions.items():
+        report[module_name] = {}
+        for rule_id, ex_data in exemptions.items():
+            entry = dict(ex_data)
+            entry["timestamp"] = timestamp_str
+            report[module_name][rule_id] = entry
+    return json.dumps(report, indent=2)
 
 
 def check_exemptions(

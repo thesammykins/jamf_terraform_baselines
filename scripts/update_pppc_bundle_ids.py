@@ -23,7 +23,7 @@ import argparse
 import re
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Tuple
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -321,14 +321,14 @@ def main() -> None:
         print(w, file=sys.stderr)
 
     # Print summary
-    print(f"\nPPPC Bundle ID Validation Report")
-    print(f"=" * 40)
+    print("\nPPPC Bundle ID Validation Report")
+    print("=" * 40)
     print(f"Modules checked: {len(report['modules'])}")
     print(f"Total tools:     {report['total_tools']}")
     print(f"Invalid IDs:     {report['errors']}")
 
     if report["errors"] > 0:
-        print(f"\nDetailed results:")
+        print("\nDetailed results:")
         for mod in report["modules"]:
             if mod["invalid_count"] > 0:
                 print(f"\n  Module: {mod['module']} ({mod['path']})")

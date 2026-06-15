@@ -55,10 +55,10 @@ resource "jamfpro_macos_configuration_profile_plist" "screensaver" {
   distribution_method = "Install Automatically"
   redeploy_on_update  = "Newly Assigned"
   user_removable      = false
-  payloads            = templatefile("${path.module}/templates/screensaver.mobileconfig.tftpl", {
+  payloads = templatefile("${path.module}/templates/screensaver.mobileconfig.tftpl", {
     idle_timeout_minutes = var.screensaver_idle_timeout_minutes
   })
-  payload_validate    = true
+  payload_validate = true
 
   scope {
     all_computers = true

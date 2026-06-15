@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>PayloadContent</key>
+    <dict>
+        <key>com.apple.applicationaccess</key>
+        <dict>
+            <key>allowGenmoji</key>
+            %{ if allow_genmoji }<true/>%{ else }<false/>%{ endif }
+            <key>allowImagePlayground</key>
+            %{ if allow_image_playground }<true/>%{ else }<false/>%{ endif }
+            <key>allowImageWand</key>
+            %{ if allow_image_wand }<true/>%{ else }<false/>%{ endif }
+            <key>allowWritingTools</key>
+            %{ if allow_writing_tools }<true/>%{ else }<false/>%{ endif }
+            <key>allowPersonalizedHandwritingResults</key>
+            %{ if allow_personalized_handwriting }<true/>%{ else }<false/>%{ endif }
+            <key>allowMailSummary</key>
+            %{ if allow_mail_summary }<true/>%{ else }<false/>%{ endif }
+            <key>allowNotesTranscription</key>
+            %{ if allow_notes_transcription }<true/>%{ else }<false/>%{ endif }
+            <key>allowNotesTranscriptionSummary</key>
+            %{ if allow_notes_transcription_summary }<true/>%{ else }<false/>%{ endif }
+        </dict>
+    </dict>
+    <key>PayloadDisplayName</key>
+    <string>[LEGACY] macAdmin Foundation — Apple Intelligence Settings</string>
+    <key>PayloadIdentifier</key>
+    <string>com.example.foundation.intelligence-settings.legacy</string>
+    <key>PayloadType</key>
+    <string>Configuration</string>
+    <key>PayloadUUID</key>
+    <string>A1B2C3D4-E5F6-7890-ABCD-EF1234567891</string>
+    <key>PayloadVersion</key>
+    <integer>1</integer>
+</dict>
+</plist>

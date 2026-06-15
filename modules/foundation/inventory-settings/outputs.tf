@@ -1,4 +1,4 @@
-output "inventory_settings_id" {
-  value       = one(jamfpro_computer_checkin.inventory_settings[*].id)
-  description = "Jamf Pro ID of the computer check-in and inventory settings"
+output "client_checkin_id" {
+  value       = one(jamfpro_client_checkin.inventory_settings[*].id)
+  description = "Jamf Pro ID of the client check-in settings"
 }

@@ -1,4 +1,4 @@
-output "enrollment_settings_id" {
-  value       = one(jamfpro_enrollment_settings.device_enrollment[*].id)
-  description = "Jamf Pro ID of the automated device enrollment settings"
+output "prestage_enrollment_id" {
+  value       = one(jamfpro_computer_prestage_enrollment.device_enrollment[*].id)
+  description = "Jamf Pro ID of the computer prestage enrollment"
 }

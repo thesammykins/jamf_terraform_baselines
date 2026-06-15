@@ -25,10 +25,9 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -87,6 +86,10 @@ SUPPORTED_BASELINES: Dict[str, Dict[str, str]] = {
         "display_name": "Netherlands BIO — Plus",
         "category": "government",
     },
+    "hicp_lp": {
+        "display_name": "HICP — Large Healthcare Organizations",
+        "category": "government",
+    },
     "cis_lvl1": {
         "display_name": "CIS macOS Benchmark — Level 1",
         "category": "industry",
@@ -99,6 +102,11 @@ SUPPORTED_BASELINES: Dict[str, Dict[str, str]] = {
         "display_name": "CIS Controls v8",
         "category": "industry",
     },
+}
+
+# Mapping from baseline key to actual YAML filename (handles case mismatches)
+BASELINE_FILENAME_MAP: Dict[str, str] = {
+    "disa_stig": "DISA-STIG.yaml",
 }
 
 SUPPORTED_VERSIONS: Dict[str, Dict[str, str]] = {
@@ -198,9 +206,38 @@ def parse_version_yaml(mscp_path: Path) -> Dict[str, str]:
         return {"branch": "unknown", "revision": "unknown"}
     with open(version_file, "r", encoding="utf-8") as fh:
         data: Dict[str, Any] = yaml.safe_load(fh) or {}
+
+    # mSCP 2.0: "version" field contains branch info (e.g. "Tahoe Guidance, Revision 2.0")
+    version_str: str = str(data.get("version", data.get("branch", "unknown")))
+    os_str: str = str(data.get("os", "unknown"))
+
+    # Derive branch from version string
+    branch_lower = version_str.lower()
+    if "tahoe" in branch_lower:
+        branch = "tahoe"
+    elif "sequoia" in branch_lower:
+        branch = "sequoia"
+    elif "sonoma" in branch_lower:
+        branch = "sonoma"
+    else:
+        branch = str(data.get("branch", "unknown"))
+
+    # Derive revision from version string (e.g. "Revision 2.0" → "rev2")
+    revision_raw: Any = data.get("revision")
+    if revision_raw is not None:
+        revision = str(revision_raw)
+    else:
+        import re
+        rev_match = re.search(r"[Rr]evision\s+([0-9.]+)", version_str)
+        if rev_match:
+            revision = f"rev{rev_match.group(1)}"
+        else:
+            revision = version_str
+
     return {
-        "branch": str(data.get("branch", "unknown")),
-        "revision": str(data.get("revision", "unknown")),
+        "branch": branch,
+        "revision": revision,
+        "os": os_str,
     }
 
 
@@ -265,6 +302,9 @@ def extract_rules_from_baseline(
     YAML to pull title, discussion, severity, references, and
     version-specific enforcement info.
 
+    Supports both mSCP 1.0 (profile as dict with sections) and mSCP 2.0
+    (profile as list of {section, rules} entries).
+
     Args:
         baseline_data: Parsed baseline YAML.
         rules_dir: Resolved path to the ``rules/`` directory.
@@ -274,44 +314,61 @@ def extract_rules_from_baseline(
     Returns:
         List of rule dicts ready for Terraform resource generation.
     """
-    profile: Dict[str, Any] = baseline_data.get("profile", {})
-    sections: List[Dict[str, Any]] = profile.get("section", [])
+    profile: Any = baseline_data.get("profile", [])
     rules: List[Dict[str, Any]] = []
 
-    for section in sections:
-        section_rules: List[str] = section.get("rules", [])
-        for rule_id in section_rules:
-            rule_path = find_rule_yaml(rules_dir, rule_id)
-            title = rule_id
-            discussion = ""
-            severity = "medium"
-            references: Dict[str, Any] = {}
-            platforms_info: Dict[str, Any] = {}
+    # Collect all rule IDs from the profile
+    rule_ids: List[str] = []
 
-            if rule_path is not None:
-                rule_data = parse_rule_yaml(rule_path)
-                title = rule_data.get("title", rule_id)
-                discussion = rule_data.get("discussion", "")
-                severity = rule_data.get("severity", "medium")
-                references = rule_data.get("references", {})
-                platforms_raw: Dict[str, Any] = rule_data.get("platforms", {})
-                macos_info: Any = platforms_raw.get("macOS")
-                if isinstance(macos_info, list):
-                    for entry in macos_info:
-                        if isinstance(entry, dict):
-                            platforms_info = entry
-                            break
+    if isinstance(profile, list):
+        # mSCP 2.0 format: profile is a list of {section: str, rules: [str]}
+        for entry in profile:
+            if isinstance(entry, dict):
+                entry_rules: Any = entry.get("rules", [])
+                if isinstance(entry_rules, list):
+                    rule_ids.extend(entry_rules)
+    elif isinstance(profile, dict):
+        # mSCP 1.0 format: profile has sections with embedded rule lists
+        sections: Any = profile.get("section", [])
+        if isinstance(sections, list):
+            for section in sections:
+                if isinstance(section, dict):
+                    section_rules: Any = section.get("rules", [])
+                    if isinstance(section_rules, list):
+                        rule_ids.extend(section_rules)
 
-            rules.append(
-                {
-                    "id": rule_id,
-                    "title": title,
-                    "discussion": discussion,
-                    "severity": severity,
-                    "references": references,
-                    "platforms": platforms_info,
-                }
-            )
+    for rule_id in rule_ids:
+        rule_path = find_rule_yaml(rules_dir, rule_id)
+        title = rule_id
+        discussion = ""
+        severity = "medium"
+        references: Dict[str, Any] = {}
+        platforms_info: Dict[str, Any] = {}
+
+        if rule_path is not None:
+            rule_data = parse_rule_yaml(rule_path)
+            title = rule_data.get("title", rule_id)
+            discussion = rule_data.get("discussion", "")
+            severity = rule_data.get("severity", "medium")
+            references = rule_data.get("references", {})
+            platforms_raw: Dict[str, Any] = rule_data.get("platforms", {})
+            macos_info: Any = platforms_raw.get("macOS")
+            if isinstance(macos_info, list):
+                for entry in macos_info:
+                    if isinstance(entry, dict):
+                        platforms_info = entry
+                        break
+
+        rules.append(
+            {
+                "id": rule_id,
+                "title": title,
+                "discussion": discussion,
+                "severity": severity,
+                "references": references,
+                "platforms": platforms_info,
+            }
+        )
 
     return rules
 
@@ -398,16 +455,23 @@ def generate_main_tf(
     Returns:
         HCL string for ``main.tf``.
     """
-    rules_json = json.dumps(
-        [
-            {
-                "id": r["id"],
-                "title": r["title"],
-                "severity": r["severity"],
-            }
-            for r in rules
-        ],
-        indent=4,
+    # Use custom formatting for HCL-compatible JSON (space before colon)
+    rules_list = [
+        {
+            "id": r["id"],
+            "title": r["title"],
+            "severity": r["severity"],
+        }
+        for r in rules
+    ]
+    raw = json.dumps(rules_list, indent=2)
+    # terraform fmt expects "key" : "value" not "key": "value"
+    import re
+    raw = re.sub(r'"([^"]+)":', r'"\1" :', raw)
+    # Add 2 spaces to every line after the first to align with locals{} block indent
+    lines = raw.split("\n")
+    rules_json = "\n".join(
+        [lines[0]] + [f"  {line}" if line.strip() else "" for line in lines[1:]]
     )
 
     return f'''# Compliance Baseline: {baseline_display_name}
@@ -462,8 +526,8 @@ resource "jamfplatform_cbengine_benchmark" "this" {{
 
   rules = [
     for r in data.jamfplatform_cbengine_rules.this.rules : {{
-      id      = r.id
-      enabled = contains(keys(local.enabled_rules), r.id)
+      id        = r.id
+      enabled   = contains(keys(local.enabled_rules), r.id)
       odv_value = try(var.rule_overrides[r.id].odv_value, null)
     }}
   ]
@@ -610,7 +674,7 @@ def generate_outputs_tf(
     baseline_key: str,
     baseline_display_name: str,
 ) -> str:
-    """Generate ``outputs.tf`` with benchmark ID and exemption report.
+    """Generate ``outputs.tf`` with benchmark ID, device group ID, and exemptions.
 
     Args:
         baseline_key: e.g. ``"cis_lvl1"``.
@@ -627,7 +691,12 @@ output "benchmark_id" {{
   description = "ID of the created benchmark resource"
 }}
 
-output "exemption_report" {{
+output "device_group_id" {{
+  value       = jamfplatform_device_group.this.id
+  description = "ID of the created device group"
+}}
+
+output "exemptions" {{
   value = {{
     for k, v in var.exemptions : k => merge(v, {{
       module        = var.baseline_id
@@ -636,6 +705,18 @@ output "exemption_report" {{
     }})
   }}
   description = "Active exemptions with audit justification"
+}}
+
+# Deprecated alias for backwards compatibility
+output "exemption_report" {{
+  value = {{
+    for k, v in var.exemptions : k => merge(v, {{
+      module        = var.baseline_id
+      macos_version = var.macos_version
+      timestamp     = timestamp()
+    }})
+  }}
+  description = "Active exemptions with audit justification (deprecated, use exemptions)"
 }}
 '''
 
@@ -733,6 +814,20 @@ mSCP baseline definition at https://github.com/usnistgov/macos_security.
 # ---------------------------------------------------------------------------
 
 
+def _generate_versions_tf() -> str:
+    """Generate ``versions.tf`` with required provider constraints."""
+    return '''terraform {
+  required_version = ">= 1.3.0"
+  required_providers {
+    jamfplatform = {
+      source  = "Jamf-Concepts/jamfplatform"
+      version = ">= 0.17.0"
+    }
+  }
+}
+'''
+
+
 def write_module(
     output_dir: Path,
     baseline_key: str,
@@ -746,7 +841,7 @@ def write_module(
 ) -> None:
     """Write a complete Terraform module to the output directory.
 
-    Creates: ``main.tf``, ``variables.tf``, ``outputs.tf``, ``README.md``.
+    Creates: ``main.tf``, ``variables.tf``, ``outputs.tf``, ``versions.tf``, ``README.md``.
 
     Args:
         output_dir: Base output directory (e.g. ``modules/compliance``).
@@ -790,6 +885,9 @@ def write_module(
     )
     (module_dir / "outputs.tf").write_text(outputs_tf, encoding="utf-8")
 
+    versions_tf = _generate_versions_tf()
+    (module_dir / "versions.tf").write_text(versions_tf, encoding="utf-8")
+
     readme = generate_readme(
         baseline_key=baseline_key,
         baseline_display_name=baseline_display_name,
@@ -828,7 +926,7 @@ def generate_all(
     Returns:
         List of generated module directory paths.
     """
-    yaml = _import_yaml()
+    _import_yaml()
     rules_dir = resolve_rules_dir(mscp_path)
     baselines_dir = resolve_baselines_dir(mscp_path)
     version_info = parse_version_yaml(mscp_path)
@@ -839,7 +937,9 @@ def generate_all(
         if baseline_filter is not None and baseline_key != baseline_filter:
             continue
 
-        baseline_file = baselines_dir / f"{baseline_key}.yaml"
+        baseline_file = baselines_dir / BASELINE_FILENAME_MAP.get(
+            baseline_key, f"{baseline_key}.yaml"
+        )
         if not baseline_file.is_file():
             print(
                 f"Warning: baseline file not found: {baseline_file}",

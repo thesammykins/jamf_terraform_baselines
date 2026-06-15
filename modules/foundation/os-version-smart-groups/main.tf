@@ -12,6 +12,9 @@ locals {
     "macOS 26 — Tahoe" = {
       os_version = "26.0"
     }
+    "macOS 27 — Golden Gate" = {
+      os_version = "27.0"
+    }
     "macOS — Unsupported" = {
       os_version = "13.9"
     }
@@ -20,17 +23,20 @@ locals {
   group_keys = keys(local.os_groups)
 }
 
-resource "jamfpro_smart_computer_group" "this" {
+# Uses jamfpro_smart_computer_group_v2 which follows the /api/v2/smart-computer-groups endpoint.
+# Criteria use `value` (not `search_value`) per the provider schema.
+resource "jamfpro_smart_computer_group_v2" "this" {
   count = (
     var.enable_smart_groups &&
     !contains(keys(var.exemptions), "os_version_smart_groups")
   ) ? length(local.group_keys) : 0
 
-  name = local.group_keys[count.index]
+  name    = local.group_keys[count.index]
+  site_id = "-1"
 
   criteria {
-    name         = "Operating System Version"
-    search_type  = "greater than or equal"
-    search_value = local.os_groups[local.group_keys[count.index]].os_version
+    name        = "Operating System Version"
+    search_type = "greater than or equal"
+    value       = local.os_groups[local.group_keys[count.index]].os_version
   }
 }

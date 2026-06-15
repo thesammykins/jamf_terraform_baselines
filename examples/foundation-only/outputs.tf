@@ -1,39 +1,39 @@
-output "foundation_categories" {
-  description = "IDs of created Jamf Pro categories (Security, Productivity, Utilities, Communication, Browsers, Developer Tools)"
-  value       = module.foundation.categories
+output "smart_group_ids" {
+  description = "OS version smart group IDs for use in DDM update plan targeting"
+  value       = module.os_version_smart_groups.smart_group_ids
 }
 
-output "foundation_smart_groups" {
-  description = "IDs of OS-version smart computer groups (macOS 14, 15, 26, Unsupported)"
-  value       = module.foundation.smart_groups
+output "security_profile_ids" {
+  description = "Security baseline configuration profile IDs (filevault, firewall, screensaver, gatekeeper)"
+  value       = module.security_baseline.profile_ids
 }
 
-output "foundation_security_profiles" {
-  description = "IDs of deployed security baseline configuration profiles"
-  value       = module.foundation.security_profiles
+output "software_update_ddm_plan_ids" {
+  description = "DDM-native software update plan IDs per version group"
+  value       = module.software_updates.ddm_plan_ids
 }
 
-output "foundation_software_update_profiles" {
-  description = "IDs of deployed software update configuration profiles"
-  value       = module.foundation.software_update_profiles
+output "software_update_feature_toggle_id" {
+  description = "Managed Software Update feature toggle ID"
+  value       = module.software_updates.feature_toggle_id
 }
 
-output "foundation_pppc_profiles" {
-  description = "IDs of deployed PPPC configuration profiles"
-  value       = module.foundation.pppc_profiles
+output "prestage_enrollment_id" {
+  description = "Computer prestage enrollment ID"
+  value       = module.device_enrollment.prestage_enrollment_id
 }
 
-output "foundation_device_enrollment" {
-  description = "ADE enrollment settings configured"
-  value       = module.foundation.device_enrollment
+output "client_checkin_id" {
+  description = "Client check-in settings ID"
+  value       = module.inventory_settings.client_checkin_id
 }
 
-output "foundation_inventory_settings" {
-  description = "Jamf Pro inventory collection settings"
-  value       = module.foundation.inventory_settings
+output "intelligence_ddm_profile_id" {
+  description = "DDM-native Apple Intelligence configuration profile ID"
+  value       = module.intelligence_settings.ddm_profile_id
 }
 
-output "foundation_exemptions" {
-  description = "Active exemptions for foundation modules"
-  value       = module.foundation.exemptions
+output "external_intelligence_ddm_profile_id" {
+  description = "DDM-native External Intelligence configuration profile ID"
+  value       = module.external_intelligence_settings.ddm_profile_id
 }

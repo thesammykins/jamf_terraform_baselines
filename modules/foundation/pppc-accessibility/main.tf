@@ -16,18 +16,18 @@ locals {
   # Build the Accessibility payload array
   accessibility_entries = [
     for name, config in local.selected_tools : {
-      Accessibility                                  = true
-      Authorization                                 = "AllowStandardUserToSetSystemService"
-      Identifier                                    = config.bundle_id
-      IdentifierType                                = config.identifier_type
-      CodeRequirement                               = config.code_requirement
-      Comment                                       = "${name} — ${config.description}"
-      PayloadDescription                           = "${name} Accessibility Access"
-      PayloadDisplayName                           = "PPPC — ${name} (Accessibility)"
-      PayloadIdentifier                            = "com.example.pppc.accessibility.${replace(lower(name), " ", "-")}"
-      PayloadType                                  = "com.apple.TCC.configuration-profile-policy"
-      PayloadUUID                                  = uuidv5("dns", "com.example.pppc.accessibility.${name}")
-      PayloadVersion                                = 1
+      Accessibility      = true
+      Authorization      = "AllowStandardUserToSetSystemService"
+      Identifier         = config.bundle_id
+      IdentifierType     = config.identifier_type
+      CodeRequirement    = config.code_requirement
+      Comment            = "${name} — ${config.description}"
+      PayloadDescription = "${name} Accessibility Access"
+      PayloadDisplayName = "PPPC — ${name} (Accessibility)"
+      PayloadIdentifier  = "com.example.pppc.accessibility.${replace(lower(name), " ", "-")}"
+      PayloadType        = "com.apple.TCC.configuration-profile-policy"
+      PayloadUUID        = uuidv5("dns", "com.example.pppc.accessibility.${name}")
+      PayloadVersion     = 1
     }
   ]
 }
@@ -44,13 +44,13 @@ resource "jamfpro_macos_configuration_profile_plist" "pppc_accessibility" {
   distribution_method = "Install Automatically"
   redeploy_on_update  = "Newly Assigned"
   user_removable      = false
-  payloads            = templatefile("${path.module}/templates/pppc.mobileconfig.tftpl", {
-    display_name      = "macAdmin Foundation — PPPC Accessibility"
-    identifier         = "com.example.foundation.pppc-accessibility"
-    uuid               = "F6A7B8C9-0D1E-2F3A-4B5C-6D7E8F9A0B1C"
-    payload_content    = jsonencode(local.accessibility_entries)
+  payloads = templatefile("${path.module}/templates/pppc.mobileconfig.tftpl", {
+    display_name    = "macAdmin Foundation — PPPC Accessibility"
+    identifier      = "com.example.foundation.pppc-accessibility"
+    uuid            = "F6A7B8C9-0D1E-2F3A-4B5C-6D7E8F9A0B1C"
+    payload_content = jsonencode(local.accessibility_entries)
   })
-  payload_validate    = true
+  payload_validate = true
 
   scope {
     all_computers = true

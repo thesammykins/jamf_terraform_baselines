@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>PayloadContent</key>
+    <dict>
+        <key>com.apple.configuration.intelligence.settings</key>
+        <dict>
+            <key>AllowAppleIntelligenceReport</key>
+            %{ if allow_apple_intelligence_report }<true/>%{ else }<false/>%{ endif }
+            <key>AllowGenmoji</key>
+            %{ if allow_genmoji }<true/>%{ else }<false/>%{ endif }
+            <key>AllowImagePlayground</key>
+            %{ if allow_image_playground }<true/>%{ else }<false/>%{ endif }
+            <key>AllowImageWand</key>
+            %{ if allow_image_wand }<true/>%{ else }<false/>%{ endif }
+            <key>AllowPersonalizedHandwritingResults</key>
+            %{ if allow_personalized_handwriting }<true/>%{ else }<false/>%{ endif }
+            <key>AllowVisualIntelligenceSummary</key>
+            %{ if allow_visual_intelligence_summary }<true/>%{ else }<false/>%{ endif }
+            <key>AllowWritingTools</key>
+            %{ if allow_writing_tools }<true/>%{ else }<false/>%{ endif }
+            <key>Apps</key>
+            <dict>
+                <key>Mail</key>
+                <dict>
+                    <key>AllowSmartReplies</key>
+                    %{ if allow_mail_smart_replies }<true/>%{ else }<false/>%{ endif }
+                    <key>AllowSummary</key>
+                    %{ if allow_mail_summary }<true/>%{ else }<false/>%{ endif }
+                </dict>
+                <key>Notes</key>
+                <dict>
+                    <key>AllowTranscription</key>
+                    %{ if allow_notes_transcription }<true/>%{ else }<false/>%{ endif }
+                    <key>AllowTranscriptionSummary</key>
+                    %{ if allow_notes_transcription_summary }<true/>%{ else }<false/>%{ endif }
+                </dict>
+                <key>Safari</key>
+                <dict>
+                    <key>AllowSummary</key>
+                    %{ if allow_safari_summary }<true/>%{ else }<false/>%{ endif }
+                </dict>
+            </dict>
+            <key>ForceOnDeviceOnlyDictation</key>
+            %{ if force_on_device_dictation }<true/>%{ else }<false/>%{ endif }
+            <key>ForceOnDeviceOnlyTranslation</key>
+            %{ if force_on_device_translation }<true/>%{ else }<false/>%{ endif }
+        </dict>
+    </dict>
+    <key>PayloadDisplayName</key>
+    <string>macAdmin Foundation — Apple Intelligence Settings</string>
+    <key>PayloadIdentifier</key>
+    <string>com.example.foundation.intelligence-settings.ddm</string>
+    <key>PayloadType</key>
+    <string>Configuration</string>
+    <key>PayloadUUID</key>
+    <string>A1B2C3D4-E5F6-7890-ABCD-EF1234567890</string>
+    <key>PayloadVersion</key>
+    <integer>1</integer>
+    <key>TargetDeviceType</key>
+    <integer>5</integer>
+</dict>
+</plist>

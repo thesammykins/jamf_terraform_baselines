@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>PayloadContent</key>
+    <dict>
+        <key>com.apple.configuration.external-intelligence.settings</key>
+        <dict>
+            <key>Enabled</key>
+            %{ if enabled }<true/>%{ else }<false/>%{ endif }
+            <key>AllowSignIn</key>
+            %{ if allow_sign_in }<true/>%{ else }<false/>%{ endif }
+%{ if length(allowed_workspace_ids) > 0 }
+            <key>AllowedWorkspaceIDs</key>
+            <array>
+%{ for id in allowed_workspace_ids }
+                <string>${id}</string>
+%{ endfor }
+            </array>
+%{ endif }
+        </dict>
+    </dict>
+    <key>PayloadDisplayName</key>
+    <string>macAdmin Foundation — External Intelligence Settings</string>
+    <key>PayloadIdentifier</key>
+    <string>com.example.foundation.external-intelligence-settings.ddm</string>
+    <key>PayloadType</key>
+    <string>Configuration</string>
+    <key>PayloadUUID</key>
+    <string>B2C3D4E5-F6A7-8901-BCDE-F12345678901</string>
+    <key>PayloadVersion</key>
+    <integer>1</integer>
+    <key>TargetDeviceType</key>
+    <integer>5</integer>
+</dict>
+</plist>

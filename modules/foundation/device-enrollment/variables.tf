@@ -18,6 +18,36 @@ variable "exemptions" {
   description = "Foundation module exemptions with audit justification"
 }
 
+variable "prestage_display_name" {
+  type        = string
+  default     = "macAdmin Foundation PreStage"
+  description = "Display name for the computer prestage enrollment"
+}
+
+variable "support_phone_number" {
+  type        = string
+  default     = ""
+  description = "Support phone number shown during enrollment"
+}
+
+variable "support_email_address" {
+  type        = string
+  default     = ""
+  description = "Support email address shown during enrollment"
+}
+
+variable "prestage_department" {
+  type        = string
+  default     = ""
+  description = "Department name for the prestage enrollment"
+}
+
+variable "device_enrollment_program_instance_id" {
+  type        = string
+  default     = "1"
+  description = "The ID of the DEP/ADE instance. Default is \"1\" (first instance)."
+}
+
 variable "module_name" {
   type        = string
   default     = "device-enrollment"

@@ -1,0 +1,65 @@
+name: CI/CD Validation
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    name: Lint, Test and Validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pytest ruff pyyaml requests
+
+      - name: Run Ruff Linter
+        run: ruff check scripts/
+
+      - name: Run Python unit tests
+        run: |
+          PYTHONPATH=scripts pytest tests/
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.9'
+
+      - name: Verify Terraform Formatting
+        run: terraform fmt -check -recursive
+
+      - name: Validate Example: Compliance Only
+        run: |
+          cd examples/compliance-only
+          terraform init -backend=false
+          terraform validate
+
+      - name: Validate Example: Foundation Only
+        run: |
+          cd examples/foundation-only
+          terraform init -backend=false
+          terraform validate
+
+      - name: Validate Example: Full Stack
+        run: |
+          cd examples/full-stack
+          terraform init -backend=false
+          terraform validate

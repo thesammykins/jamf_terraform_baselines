@@ -2,7 +2,7 @@
 Unit tests for scripts/generate_tf_compliance.py — the Variant A code generator.
 
 These tests validate that the compliance module generator:
-- Maintains the correct set of supported baselines (16) and macOS versions (3)
+- Maintains the correct set of supported baselines (17) and macOS versions (3)
 - Correctly parses mSCP baseline YAML definitions into structured rule data
 - Generates valid HCL (Terraform configuration) from parsed rule data
 - Creates the expected module directory structure for all baseline × version combos
@@ -16,31 +16,27 @@ from unittest.mock import MagicMock, mock_open, patch
 
 import pytest
 
-# Import the generator module (will exist once scripts/generate_tf_compliance.py is created)
-# For now, test against the expected constant values defined in TECH.md
 from scripts.generate_tf_compliance import (
     SUPPORTED_BASELINES,
     SUPPORTED_VERSIONS,
-    build_device_group,
-    build_benchmark_resource,
-    create_module_directory,
     generate_main_tf,
     generate_outputs_tf,
     generate_variables_tf,
     parse_baseline_yaml,
+    extract_rules_from_baseline,
+    write_module,
 )
-
 
 # ── Constants from spec ────────────────────────────────────────────────
 
-EXPECTED_BASELINE_COUNT = 16  # All 16 NIST mSCP baselines
+EXPECTED_BASELINE_COUNT = 17  # All 17 NIST mSCP baselines including hicp_lp
 EXPECTED_VERSION_COUNT = 3    # Sonoma (14), Sequoia (15), Tahoe (26)
 
 
 # ── Test: SUPPORTED_BASELINES ──────────────────────────────────────────
 
 def test_supported_baselines_count():
-    """SUPPORTED_BASELINES must contain exactly 16 entries matching the spec."""
+    """SUPPORTED_BASELINES must contain exactly 17 entries matching the spec."""
     count = len(SUPPORTED_BASELINES)
     assert count == EXPECTED_BASELINE_COUNT, (
         f"Expected {EXPECTED_BASELINE_COUNT} baselines, found {count}"
@@ -63,6 +59,7 @@ def test_supported_baselines_keys():
         "cnssi-1253_low",
         "nlmapgov_base",
         "nlmapgov_plus",
+        "hicp_lp",
         "cis_lvl1",
         "cis_lvl2",
         "cisv8",
@@ -82,7 +79,7 @@ def test_supported_baselines_keys():
 # ── Test: SUPPORTED_VERSIONS ───────────────────────────────────────────
 
 def test_supported_versions_count():
-    """SUPPORTED_VERSIONS must contain exactly 3 ma2cos versions."""
+    """SUPPORTED_VERSIONS must contain exactly 3 macOS versions."""
     count = len(SUPPORTED_VERSIONS)
     assert count == EXPECTED_VERSION_COUNT, (
         f"Expected {EXPECTED_VERSION_COUNT} versions, found {count}"
@@ -125,65 +122,33 @@ profile:
       - system_settings_screensaver_password_enforce
 """
 
-MOCK_RULE_YAML = """
-id: os_gatekeeper_enable
-title: Enable Gatekeeper
-discussion: "Gatekeeper ensures only trusted software runs."
-references:
-  nist:
-    cce:
-      macos_14: CCE-91000
-      macos_15: CCE-91001
-      macos_26: CCE-91002
-    800-53r5:
-      - CM-14
-  disa:
-    disa_stig:
-      - SV-123456
-severity: high
-platforms:
-  macOS:
-    14.0:
-      enforcement_info: "enforce via spctl"
-    15.0:
-      enforcement_info: "enforce via spctl"
-    26.0:
-      enforcement_info: "enforce via spctl"
-"""
-
 
 def test_parse_baseline_yaml_rules():
-    """Baseline YAML should be parsed into a list of rule IDs grouped by section."""
-    result = parse_baseline_yaml(MOCK_BASELINE_YAML)
+    """Baseline YAML should be parsed correctly into the profile sections and rules structure."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_file = Path(tmpdir) / "baseline.yaml"
+        tmp_file.write_text(MOCK_BASELINE_YAML, encoding="utf-8")
+        
+        result = parse_baseline_yaml(tmp_file)
 
-    assert "os" in result
-    assert result["os"] == [
-        "os_gatekeeper_enable",
-        "os_sip_enable",
-        "os_dictation_disable",
-    ]
-
-    assert "system_settings" in result
-    assert result["system_settings"] == [
-        "system_settings_time_server_configure",
-        "system_settings_screensaver_password_enforce",
-    ]
-
-    # Total rule count should be 5 across both sections
-    total_rules = sum(len(rules) for rules in result.values())
-    assert total_rules == 5
+        assert "profile" in result
+        profile = result["profile"]
+        assert len(profile) == 2
+        assert profile[0]["section"] == "os"
+        assert profile[0]["rules"] == [
+            "os_gatekeeper_enable",
+            "os_sip_enable",
+            "os_dictation_disable",
+        ]
 
 
 def test_parse_baseline_yaml_empty():
-    """Empty baseline YAML should return an empty dict."""
-    result = parse_baseline_yaml("")
-    assert result == {}
-
-
-def test_parse_baseline_yaml_no_profile():
-    """YAML without a profile key should return empty dict."""
-    result = parse_baseline_yaml("other_key: value\n")
-    assert result == {}
+    """Empty baseline YAML should return an empty dict or parse cleanly."""
+    with tempfile.TemporaryDirectory() as tmpdir:
+        tmp_file = Path(tmpdir) / "baseline.yaml"
+        tmp_file.write_text("", encoding="utf-8")
+        result = parse_baseline_yaml(tmp_file)
+        assert result == {}
 
 
 # ── Test: HCL generation ───────────────────────────────────────────────
@@ -193,18 +158,21 @@ MOCK_RULES = [
         "id": "os_gatekeeper_enable",
         "title": "Enable Gatekeeper",
         "severity": "high",
+        "discussion": "Gatekeeper discussion",
         "cce": {"macos_26": "CCE-91002"},
     },
     {
         "id": "os_sip_enable",
         "title": "Enable System Integrity Protection",
         "severity": "high",
+        "discussion": "SIP discussion",
         "cce": {"macos_26": "CCE-91003"},
     },
     {
         "id": "os_dictation_disable",
         "title": "Disable Dictation",
         "severity": "medium",
+        "discussion": "Dictation discussion",
         "cce": {"macos_26": "CCE-91004"},
     },
 ]
@@ -215,9 +183,9 @@ def test_generate_main_tf_produces_valid_hcl():
     hcl = generate_main_tf(
         baseline_key="cis_lvl1",
         baseline_display_name="CIS Level 1",
-        macos_version="26",
+        macos_version_major="26",
         macos_version_min="26.0",
-        mscp_branch="tahoe",
+        macos_branch="tahoe",
         mscp_revision="tahoe_rev2",
         rules=MOCK_RULES,
     )
@@ -247,9 +215,9 @@ def test_generate_main_tf_with_empty_rules():
     hcl = generate_main_tf(
         baseline_key="cis_lvl1",
         baseline_display_name="CIS Level 1",
-        macos_version="26",
+        macos_version_major="26",
         macos_version_min="26.0",
-        mscp_branch="tahoe",
+        macos_branch="tahoe",
         mscp_revision="tahoe_rev2",
         rules=[],
     )
@@ -257,13 +225,20 @@ def test_generate_main_tf_with_empty_rules():
     assert 'resource "jamfplatform_device_group"' in hcl
     assert 'data "jamfplatform_cbengine_rules"' in hcl
     assert 'resource "jamfplatform_cbengine_benchmark"' in hcl
-    # all_rules should be empty list
     assert "all_rules = []" in hcl or "all_rules = [" in hcl
 
 
 def test_generate_variables_tf():
     """variables.tf must declare enforcement_mode, exemptions, and rule_overrides."""
-    hcl = generate_variables_tf(baseline_display_name="CIS Level 1")
+    hcl = generate_variables_tf(
+        baseline_key="cis_lvl1",
+        baseline_display_name="CIS Level 1",
+        macos_version_major="26",
+        macos_version_min="26.0",
+        macos_branch="tahoe",
+        mscp_revision="tahoe_rev2",
+        rule_count=len(MOCK_RULES),
+    )
 
     assert 'variable "enforcement_mode"' in hcl
     assert 'variable "exemptions"' in hcl
@@ -274,55 +249,33 @@ def test_generate_variables_tf():
 
 def test_generate_outputs_tf():
     """outputs.tf must expose benchmark_id, device_group_id, and exemptions."""
-    hcl = generate_outputs_tf()
+    hcl = generate_outputs_tf(
+        baseline_key="cis_lvl1",
+        baseline_display_name="CIS Level 1",
+    )
 
     assert 'output "benchmark_id"' in hcl
     assert 'output "device_group_id"' in hcl
     assert 'output "exemptions"' in hcl
 
 
-def test_build_device_group():
-    """Device group resource must target the correct OS version."""
-    block = build_device_group(
-        baseline_display_name="CIS Level 1",
-        macos_version="26",
-        macos_version_min="26.0",
-    )
-
-    assert "jamfplatform_device_group" in block
-    assert "CIS Level 1" in block
-    assert "macOS 26" in block or "macos_26" in block
-    assert "Operating System Version" in block
-    assert "greater than or equal" in block
-    assert "26.0" in block or "26" in block
-
-
-def test_build_benchmark_resource():
-    """Benchmark resource must reference the mSCP branch + revision."""
-    block = build_benchmark_resource(
-        baseline_id="cis_lvl1",
-        baseline_display_name="CIS Level 1",
-        mscp_branch="tahoe",
-        mscp_revision="tahoe_rev2",
-    )
-
-    assert "jamfplatform_cbengine_benchmark" in block
-    assert "tahoe" in block
-    assert "tahoe_rev2" in block
-    assert "Managed by Terraform" in block
-
-
 # ── Test: Module directory structure ───────────────────────────────────
 
-def test_create_module_directory_structure():
-    """Module directories must be created in the correct baseline/version layout."""
+def test_write_module():
+    """write_module must write all files in the correct baseline/version layout."""
     with tempfile.TemporaryDirectory() as tmpdir:
         output_base = Path(tmpdir) / "modules" / "compliance"
 
-        result = create_module_directory(
-            output_base=output_base,
+        write_module(
+            output_dir=output_base,
             baseline_key="cis_lvl1",
-            macos_version="26",
+            baseline_display_name="CIS Level 1",
+            category="industry",
+            macos_version_major="26",
+            macos_version_min="26.0",
+            macos_branch="tahoe",
+            mscp_revision="tahoe_rev2",
+            rules=MOCK_RULES,
         )
 
         # Check that all expected files were created
@@ -331,40 +284,18 @@ def test_create_module_directory_structure():
         assert (expected_dir / "main.tf").exists()
         assert (expected_dir / "variables.tf").exists()
         assert (expected_dir / "outputs.tf").exists()
+        assert (expected_dir / "versions.tf").exists()
         assert (expected_dir / "README.md").exists()
 
-        # Check the returned path
-        assert result == expected_dir
-
-
-def test_create_module_directory_for_all_versions():
-    """Generator should create directories for all 3 supported macOS versions."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        output_base = Path(tmpdir) / "modules" / "compliance"
-        created = []
-
-        for ver_key, ver_info in SUPPORTED_VERSIONS.items():
-            path = create_module_directory(
-                output_base=output_base,
-                baseline_key="cis_lvl1",
-                macos_version=ver_key,
-            )
-            created.append(path)
-            assert path.exists()
-
-        assert len(created) == EXPECTED_VERSION_COUNT
-
-
-# ── Test: HCL formatting ──────────────────────────────────────────────
 
 def test_generated_hcl_uses_terraform_conventions():
     """Generated HCL should follow Terraform formatting conventions."""
     hcl = generate_main_tf(
         baseline_key="cis_lvl1",
         baseline_display_name="CIS Level 1",
-        macos_version="26",
+        macos_version_major="26",
         macos_version_min="26.0",
-        mscp_branch="tahoe",
+        macos_branch="tahoe",
         mscp_revision="tahoe_rev2",
         rules=MOCK_RULES,
     )

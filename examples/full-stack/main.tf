@@ -21,9 +21,10 @@ provider "jamfplatform" {
 
 # ── Provider: Jamf Pro (Variant B — Foundation) ──────────────────────
 provider "jamfpro" {
-  client_id     = var.jamfpro_client_id
-  client_secret = var.jamfpro_client_secret
-  instance_fqdn = var.jamfpro_instance_fqdn
+  client_id             = var.jamfpro_client_id
+  client_secret         = var.jamfpro_client_secret
+  jamfpro_instance_fqdn = var.jamfpro_instance_fqdn
+  auth_method           = "oauth2"
 }
 
 # ─────────────────────────────────────────────────────────────────────
@@ -74,11 +75,11 @@ module "nist_80053_moderate_tahoe" {
       review_date = "2026-12-01"
     }
     "os_iphone_mirroring_disable" = {
-      reason      = "Engineering team uses iPhone mirroring for iOS app testing on Mac"
-      ticket      = "ENG-4412"
-      risk_status = "ACCEPTED_WITH_COMPENSATING_CONTROLS"
+      reason                = "Engineering team uses iPhone mirroring for iOS app testing on Mac"
+      ticket                = "ENG-4412"
+      risk_status           = "ACCEPTED_WITH_COMPENSATING_CONTROLS"
       compensating_controls = "iPhone Mirroring restricted to Developer VLAN (subnet 10.88.0.0/16) via network segmentation; only enrolled corporate iPhones permitted"
-      reviewer    = "security-team@example.com"
+      reviewer              = "security-team@example.com"
     }
     "system_settings_bluetooth_disable" = {
       reason      = "Bluetooth required for wireless peripherals in open-plan office"
@@ -94,22 +95,61 @@ module "nist_80053_moderate_tahoe" {
 # Variant B — macAdmin Foundation
 # ─────────────────────────────────────────────────────────────────────
 
-module "foundation" {
-  source = "../../modules/foundation"
+# ── Variant B Submodules ────────────────────────────────────────────
 
-  enable_categories              = true
-  enable_os_version_smart_groups = true
-  enable_security_baseline       = true
-  enable_software_updates        = true
-  enable_pppc_screen_capture     = true
-  enable_pppc_accessibility      = true
-  enable_device_enrollment       = true
-  enable_inventory_settings      = true
+module "categories" {
+  source = "../../modules/foundation/categories"
 
-  # Custom settings for this organization
+  enable_categories = true
+}
+
+module "os_version_smart_groups" {
+  source = "../../modules/foundation/os-version-smart-groups"
+
+  enable_smart_groups = true
+}
+
+module "security_baseline" {
+  source = "../../modules/foundation/security-baseline"
+
+  enable_security_baseline         = true
+  screensaver_idle_timeout_minutes = 5
+}
+
+module "software_updates" {
+  source = "../../modules/foundation/software-updates"
+
+  enable_software_updates             = true
+  manage_feature_toggle               = true
+  use_legacy_profile                  = false
+  ddm_update_action                   = "DOWNLOAD_INSTALL_ALLOW_DEFERRAL"
+  ddm_version_type                    = "LATEST_MAJOR"
+  ddm_max_deferrals                   = 3
   software_update_major_deferral_days = 90
-  screensaver_idle_timeout_minutes    = 5
-  pppc_tools = ["Zoom", "Slack", "Microsoft Teams", "Google Chrome", "Webex"]
+  software_update_minor_deferral_days = 14
+  rapid_security_response_enabled     = true
+
+  smart_group_ids = module.os_version_smart_groups.smart_group_ids
+}
+
+module "pppc_screen_capture" {
+  source = "../../modules/foundation/pppc-screen-capture"
+
+  enable_pppc_screen_capture = true
+  pppc_tools                 = ["Zoom", "Slack", "Microsoft Teams", "Google Chrome", "Webex"]
+}
+
+module "pppc_accessibility" {
+  source = "../../modules/foundation/pppc-accessibility"
+
+  enable_pppc_accessibility = true
+  pppc_tools                = ["Zoom", "Slack", "Microsoft Teams", "Dropbox"]
+}
+
+module "device_enrollment" {
+  source = "../../modules/foundation/device-enrollment"
+
+  enable_device_enrollment = false
 
   exemptions = {
     "device_enrollment" = {
@@ -119,4 +159,34 @@ module "foundation" {
       expires     = "2026-09-30"
     }
   }
+}
+
+module "inventory_settings" {
+  source = "../../modules/foundation/inventory-settings"
+
+  enable_inventory_settings = true
+  checkin_frequency_minutes = 15
+}
+
+module "intelligence_settings" {
+  source = "../../modules/foundation/intelligence-settings"
+
+  enable_intelligence_settings = true
+  use_legacy_profile           = false
+
+  allow_writing_tools         = true
+  allow_mail_summary          = true
+  allow_safari_summary        = true
+  force_on_device_dictation   = true
+  force_on_device_translation = true
+}
+
+module "external_intelligence_settings" {
+  source = "../../modules/foundation/external-intelligence-settings"
+
+  enable_external_intelligence_settings = true
+  use_legacy_profile                    = false
+
+  enable_external_intelligence        = false
+  allow_external_intelligence_sign_in = false
 }

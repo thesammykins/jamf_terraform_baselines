@@ -7,7 +7,12 @@ variable "enable_inventory_settings" {
 variable "checkin_frequency_minutes" {
   type        = number
   default     = 15
-  description = "Computer check-in frequency in minutes"
+  description = "Computer check-in frequency in minutes. Valid values: 5, 15, 30, or 60."
+
+  validation {
+    condition     = contains([5, 15, 30, 60], var.checkin_frequency_minutes)
+    error_message = "checkin_frequency_minutes must be one of: 5, 15, 30, 60."
+  }
 }
 
 variable "exemptions" {
