@@ -59,7 +59,7 @@ brew install terraform  # or via mise: mise install terraform
 - Generated compliance PRs are exempt from the conventional title requirement (they use `compliance:` automatically)
 - All changes pass `terraform fmt -check -recursive` and `terraform validate`
 - Exemption check CI passes
-- At least one review from a CODEOWNER
+- At least one approving review
 
 ## Testing
 
