@@ -1,3 +1,5 @@
+![banner](banner.png)
+
 # jamf_mscp_tf
 
 Terraform modules for deploying NIST mSCP compliance baselines and macAdmin foundation scaffolding into Jamf Pro. 16 compliance frameworks × 3 macOS versions — all kept current via CI.
