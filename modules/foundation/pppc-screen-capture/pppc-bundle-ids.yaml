@@ -1,0 +1,34 @@
+# PPPC Screen Capture — bundle identifiers for common collaboration tools.
+# These bundle IDs are validated against known Apple Bundle ID format
+# and updated periodically via CI (scripts/update_pppc_bundle_ids.py).
+
+tools:
+  Zoom:
+    bundle_id: "us.zoom.xos"
+    identifier_type: "bundleID"
+    code_requirement: "identifier \"us.zoom.xos\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = \"BJ4HAAB9B3\""
+    description: "Zoom video conferencing client"
+
+  Slack:
+    bundle_id: "com.tinyspeck.slackmacgap"
+    identifier_type: "bundleID"
+    code_requirement: "identifier \"com.tinyspeck.slackmacgap\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = \"BQR82RBBHL\""
+    description: "Slack desktop collaboration client"
+
+  Microsoft Teams:
+    bundle_id: "com.microsoft.teams2"
+    identifier_type: "bundleID"
+    code_requirement: "identifier \"com.microsoft.teams2\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = \"UBF8T346G9\""
+    description: "Microsoft Teams collaboration client"
+
+  Google Chrome:
+    bundle_id: "com.google.Chrome"
+    identifier_type: "bundleID"
+    code_requirement: "identifier \"com.google.Chrome\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = \"EQHXZ8M8AV\""
+    description: "Google Chrome web browser"
+
+  Webex:
+    bundle_id: "Cisco-Systems.Spark"
+    identifier_type: "bundleID"
+    code_requirement: "identifier \"Cisco-Systems.Spark\" and anchor apple generic and certificate 1[field.1.2.840.113635.100.6.2.6] exists and certificate leaf[field.1.2.840.113635.100.6.1.13] exists and certificate leaf[subject.OU] = \"DE8Y96K9QP\""
+    description: "Cisco Webex collaboration client"

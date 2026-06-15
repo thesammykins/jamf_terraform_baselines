@@ -1,0 +1,41 @@
+# Terraform
+.terraform/
+*.tfstate
+*.tfstate.*
+terraform.tfvars
+override.tf
+override.tf.json
+.terraform.lock.hcl
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.eggs/
+dist/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# CI artifacts
+.ci/*.log
+exemptions-report.json
+
+# Secrets (in case someone copies credentials here)
+*.pem
+*.key
+credentials.json
+
+# Build output
+/build/
+/tmp/

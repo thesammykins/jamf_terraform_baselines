@@ -1,0 +1,94 @@
+name: Compliance Baseline Update
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'           # Weekly Monday 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      mscp_branch:
+        description: 'mSCP branch to process'
+        required: false
+        default: 'all'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: compliance-update-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  detect-releases:
+    runs-on: ubuntu-latest
+    outputs:
+      branches: ${{ steps.detect.outputs.branches }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install pyyaml requests
+
+      - name: Detect new mSCP releases
+        id: detect
+        run: |
+          python scripts/detect_mscp_releases.py \
+            --state-file .ci/mscp-revision-state.json \
+            --output new-releases.json
+
+  generate:
+    needs: detect-releases
+    if: needs.detect-releases.outputs.branches != '[]'
+    strategy:
+      matrix:
+        branch: ${{ fromJSON(needs.detect-releases.outputs.branches) }}
+    runs-on: ubuntu-latest
+    container: ghcr.io/usnistgov/mscp_2.0:latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: '1.9'
+
+      - name: Clone mSCP at release tag
+        run: |
+          git clone -b ${{ matrix.branch }} https://github.com/usnistgov/macos_security.git /tmp/mscp
+          cd /tmp/mscp
+          git checkout ${{ steps.detect.outputs[format('{0}_tag', matrix.branch)] }}
+
+      - name: Generate compliance modules
+        run: |
+          python scripts/generate_tf_compliance.py \
+            --mscp-path /tmp/mscp \
+            --output modules/compliance \
+            --branch ${{ matrix.branch }}
+
+      - name: Generate changelog
+        run: |
+          python scripts/generate_changelog.py \
+            --mscp-path /tmp/mscp \
+            --branch ${{ matrix.branch }} \
+            --output changelog.md
+
+      - name: Terraform validate
+        run: |
+          for dir in modules/compliance/*/macos_*/; do
+            (cd "$dir" && terraform init -backend=false && terraform validate)
+          done
+
+      - name: Create pull request
+        uses: peter-evans/create-pull-request@v7
+        with:
+          title: "compliance: ${{ matrix.branch }} baseline update"
+          body-path: changelog.md
+          branch: "auto/compliance-${{ matrix.branch }}"
+          labels: "compliance,automated"

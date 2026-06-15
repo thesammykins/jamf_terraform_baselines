@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>PayloadContent</key>
+    <dict>
+        <key>com.apple.SoftwareUpdate</key>
+        <dict>
+            <key>Forced</key>
+            <array>
+                <dict>
+                    <key>mcx_preference_settings</key>
+                    <dict>
+                        <key>AutomaticCheckEnabled</key>
+                        <true/>
+                        <key>AutomaticDownload</key>
+                        <true/>
+                        <key>AutomaticallyInstallMacOSUpdates</key>
+                        <true/>
+                        <key>ConfigDataInstall</key>
+                        <true/>
+                        <key>CriticalUpdateInstall</key>
+                        <true/>
+                        <key>enforcedSoftwareUpdateMajorOSDeferredInstallDelay</key>
+                        <integer>${major_deferral_days}</integer>
+                        <key>enforcedSoftwareUpdateMinorOSDeferredInstallDelay</key>
+                        <integer>${minor_deferral_days}</integer>
+                        <key>enforcedSoftwareUpdateNonOSDeferredInstallDelay</key>
+                        <integer>${minor_deferral_days}</integer>
+                        <key>AllowRapidSecurityResponseInstallation</key>
+                        %{ if rapid_security_response }<true/>%{ else }<false/>%{ endif }
+                        <key>RapidSecurityResponseRollbackRemovals</key>
+                        %{ if rapid_security_response }<false/>%{ else }<true/>%{ endif }
+                    </dict>
+                </dict>
+            </array>
+        </dict>
+    </dict>
+    <key>PayloadDisplayName</key>
+    <string>macAdmin Foundation — Software Updates</string>
+    <key>PayloadIdentifier</key>
+    <string>com.example.foundation.software-updates</string>
+    <key>PayloadType</key>
+    <string>Configuration</string>
+    <key>PayloadUUID</key>
+    <string>D4E5F6A7-8B9C-0D1E-2F3A-4B5C6D7E8F9A</string>
+    <key>PayloadVersion</key>
+    <integer>1</integer>
+</dict>
+</plist>
