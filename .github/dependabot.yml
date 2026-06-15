@@ -1,0 +1,17 @@
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "06:00"
+      timezone: "UTC"
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    labels:
+      - "ci"
+      - "dependencies"
+    # Limit to patch/minor only — major bumps get human review
+    open-pull-requests-limit: 5
