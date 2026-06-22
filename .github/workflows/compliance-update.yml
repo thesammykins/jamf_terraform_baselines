@@ -27,7 +27,7 @@ jobs:
     outputs:
       branches: ${{ steps.detect.outputs.branches }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -53,7 +53,7 @@ jobs:
     runs-on: ubuntu-latest
     container: ghcr.io/usnistgov/mscp_2.0:latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.head_ref }}
 
