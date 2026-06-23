@@ -26,6 +26,9 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       branches: ${{ steps.detect.outputs.branches }}
+      sonoma_tag: ${{ steps.detect.outputs.sonoma_tag }}
+      sequoia_tag: ${{ steps.detect.outputs.sequoia_tag }}
+      tahoe_tag: ${{ steps.detect.outputs.tahoe_tag }}
     steps:
       - uses: actions/checkout@v6
 
@@ -43,6 +46,23 @@ jobs:
           python scripts/detect_mscp_releases.py \
             --state-file .ci/mscp-revision-state.json \
             --output new-releases.json
+
+          # Set step outputs for downstream jobs
+          python3 -c "
+import json
+
+with open('new-releases.json') as f:
+    data = json.load(f)
+
+# Branches with new releases (for matrix)
+releases = data.get('new_releases', [])
+branches = [r['branch'] for r in releases]
+print(f'branches={json.dumps(branches)}')
+
+# Per-branch latest tags (for checkout in generate job)
+for branch, tag in data.get('branches', {}).items():
+    print(f'{branch}_tag={tag}')
+" >> $GITHUB_OUTPUT
 
   generate:
     needs: detect-releases
@@ -66,7 +86,7 @@ jobs:
         run: |
           git clone -b ${{ matrix.branch }} https://github.com/usnistgov/macos_security.git /tmp/mscp
           cd /tmp/mscp
-          git checkout ${{ steps.detect.outputs[format('{0}_tag', matrix.branch)] }}
+          git checkout ${{ needs.detect-releases.outputs[format('{0}_tag', matrix.branch)] }}
 
       - name: Generate compliance modules
         run: |
