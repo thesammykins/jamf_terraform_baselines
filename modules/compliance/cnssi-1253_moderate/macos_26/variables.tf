@@ -80,7 +80,7 @@ variable "mscp_branch" {
 
 variable "mscp_revision" {
   type        = string
-  default     = "rev2.0"
+  default     = "rev3.0"
   description = "mSCP release revision (tag)"
 }
 
