@@ -111,7 +111,14 @@ jobs:
           python scripts/generate_changelog.py \
             --mscp-path /tmp/mscp \
             --branch ${{ matrix.branch }} \
-            --output changelog.md
+            --summary-output changelog-summary.md
+
+      - name: Verify generated PR artifacts
+        run: |
+          test -f .ci/mscp-revision-state.json
+          test -f .ci/mscp-rule-state.json
+          test -f changelog-summary.md
+          test -n "$(find docs/compliance-changelogs -name '${{ matrix.branch }}_*.md' -print -quit)"
 
       - name: Terraform validate
         run: |
@@ -123,6 +130,11 @@ jobs:
         uses: peter-evans/create-pull-request@v8
         with:
           title: "compliance: ${{ matrix.branch }} baseline update"
-          body-path: changelog.md
+          body-path: changelog-summary.md
           branch: "auto/compliance-${{ matrix.branch }}"
           labels: "compliance,automated"
+          add-paths: |
+            .ci/mscp-revision-state.json
+            .ci/mscp-rule-state.json
+            docs/compliance-changelogs
+            modules/compliance
