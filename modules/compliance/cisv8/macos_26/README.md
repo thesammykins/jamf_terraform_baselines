@@ -6,7 +6,7 @@
 - **Category**: industry
 - **macOS version**: 26 (26.0+)
 - **mSCP branch**: `tahoe`
-- **mSCP revision**: `rev2.0`
+- **mSCP revision**: `rev3.0`
 - **Rule count**: 177
 
 ## Severity distribution
