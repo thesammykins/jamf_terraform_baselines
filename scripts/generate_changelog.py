@@ -26,6 +26,7 @@ from typing import Any, Dict, List, Tuple
 # Import shared constants from the generator
 try:
     from generate_tf_compliance import (  # type: ignore[import-untyped]
+        BASELINE_FILENAME_MAP,
         SUPPORTED_BASELINES,
         SUPPORTED_VERSIONS,
         parse_baseline_yaml,
@@ -35,6 +36,7 @@ try:
 except ImportError:
     try:
         from scripts.generate_tf_compliance import (
+            BASELINE_FILENAME_MAP,
             SUPPORTED_BASELINES,
             SUPPORTED_VERSIONS,
             parse_baseline_yaml,
@@ -192,6 +194,33 @@ def compute_diff(
     return added, removed, common
 
 
+def extract_rule_ids_from_profile(baseline_data: Dict[str, Any]) -> List[str]:
+    """Extract rule IDs from mSCP baseline profile shapes.
+
+    Supports both the current list-based profile format and the older
+    dict-with-section format.
+    """
+    profile: Any = baseline_data.get("profile", [])
+    rule_ids: List[str] = []
+
+    if isinstance(profile, list):
+        for entry in profile:
+            if isinstance(entry, dict):
+                rules: Any = entry.get("rules", [])
+                if isinstance(rules, list):
+                    rule_ids.extend(str(rule_id) for rule_id in rules)
+    elif isinstance(profile, dict):
+        sections: Any = profile.get("section", [])
+        if isinstance(sections, list):
+            for section in sections:
+                if isinstance(section, dict):
+                    rules = section.get("rules", [])
+                    if isinstance(rules, list):
+                        rule_ids.extend(str(rule_id) for rule_id in rules)
+
+    return rule_ids
+
+
 def generate_changelog_markdown(
     baseline_key: str,
     ver_major: str,
@@ -288,7 +317,9 @@ def generate_changelog(
         old_revision = "previous"
 
     for baseline_key in SUPPORTED_BASELINES:
-        baseline_file = baselines_dir / f"{baseline_key}.yaml"
+        baseline_file = baselines_dir / BASELINE_FILENAME_MAP.get(
+            baseline_key, f"{baseline_key}.yaml"
+        )
         if not baseline_file.is_file():
             continue
 
@@ -298,12 +329,7 @@ def generate_changelog(
             if branch != "all" and ver_meta["branch"] != branch:
                 continue
 
-            # Extract current rule IDs from baseline
-            profile: Dict[str, Any] = baseline_data.get("profile", {})
-            sections: List[Dict[str, Any]] = profile.get("section", [])
-            current_rule_ids: List[str] = []
-            for section in sections:
-                current_rule_ids.extend(section.get("rules", []))
+            current_rule_ids = extract_rule_ids_from_profile(baseline_data)
 
             key = f"{baseline_key}/macos_{ver_major}"
             prev_ids = previous_state.get(key, [])
