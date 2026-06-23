@@ -88,7 +88,16 @@ jobs:
             exit 0
           fi
 
+          count="$(printf '%s\n' "$modules" | sed '/^$/d' | wc -l | tr -d ' ')"
+          echo "Validating $count changed compliance module(s)."
+
           for dir in $modules; do
-            echo "Validating $dir"
-            (cd "$dir" && terraform init -backend=false && terraform validate)
+            echo "::group::terraform validate $dir"
+            echo "Module: $dir"
+            if ! (cd "$dir" && terraform init -backend=false && terraform validate); then
+              echo "::error::Terraform validation failed for $dir"
+              echo "::endgroup::"
+              exit 1
+            fi
+            echo "::endgroup::"
           done

@@ -122,8 +122,25 @@ jobs:
 
       - name: Terraform validate
         run: |
-          for dir in modules/compliance/*/macos_*/; do
-            (cd "$dir" && terraform init -backend=false && terraform validate)
+          modules="$(find modules/compliance -mindepth 2 -maxdepth 2 -type d -name 'macos_*' | sort)"
+
+          if [ -z "$modules" ]; then
+            echo "::error::No generated compliance modules found to validate."
+            exit 1
+          fi
+
+          count="$(printf '%s\n' "$modules" | sed '/^$/d' | wc -l | tr -d ' ')"
+          echo "Validating $count generated compliance module(s)."
+
+          for dir in $modules; do
+            echo "::group::terraform validate $dir"
+            echo "Module: $dir"
+            if ! (cd "$dir" && terraform init -backend=false && terraform validate); then
+              echo "::error::Terraform validation failed for $dir"
+              echo "::endgroup::"
+              exit 1
+            fi
+            echo "::endgroup::"
           done
 
       - name: Create pull request
