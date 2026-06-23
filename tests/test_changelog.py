@@ -287,3 +287,13 @@ def test_workflow_uses_summary_body_and_full_changelog_artifact():
     assert "test -f .ci/mscp-rule-state.json" in workflow
     assert "test -f changelog-summary.md" in workflow
     assert "docs/compliance-changelogs" in workflow
+
+
+def test_release_workflow_publishes_from_committed_changelog():
+    workflow = Path(".github/workflows/compliance-release.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "docs/compliance-changelogs/*.md" in workflow
+    assert "gh release create" in workflow
+    assert "Full changelog: https://github.com/${REPOSITORY}/blob/${SHA}/${path}" in workflow
