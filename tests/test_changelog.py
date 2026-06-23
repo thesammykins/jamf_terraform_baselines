@@ -11,6 +11,7 @@ These tests validate that the changelog generator correctly:
 
 from scripts.generate_changelog import (
     compute_diff,
+    extract_rule_ids_from_profile,
     generate_changelog_markdown,
 )
 
@@ -85,6 +86,41 @@ def test_compute_diff_all_removed():
     assert len(added) == 0
     assert len(removed) == len(PREVIOUS_RULES)
     assert len(common) == 0
+
+
+def test_extract_rule_ids_from_list_profile():
+    """Current mSCP profile lists should be flattened into rule IDs."""
+    baseline_data = {
+        "profile": [
+            {"section": "macos", "rules": ["os_gatekeeper_enable"]},
+            {
+                "section": "systemsettings",
+                "rules": ["system_settings_screensaver_timeout_enforce"],
+            },
+        ]
+    }
+
+    assert extract_rule_ids_from_profile(baseline_data) == [
+        "os_gatekeeper_enable",
+        "system_settings_screensaver_timeout_enforce",
+    ]
+
+
+def test_extract_rule_ids_from_legacy_dict_profile():
+    """Legacy mSCP profile dictionaries should remain supported."""
+    baseline_data = {
+        "profile": {
+            "section": [
+                {"rules": ["os_gatekeeper_enable"]},
+                {"rules": ["os_sip_enable"]},
+            ]
+        }
+    }
+
+    assert extract_rule_ids_from_profile(baseline_data) == [
+        "os_gatekeeper_enable",
+        "os_sip_enable",
+    ]
 
 
 # ── Test: Markdown output ──────────────────────────────────────────────
