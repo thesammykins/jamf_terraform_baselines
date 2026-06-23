@@ -2,7 +2,7 @@
   "branches": {
     "sequoia": "sequoia_rev4",
     "sonoma": "sonoma_rev5",
-    "tahoe": "tahoe_rev3"
+    "tahoe": "tahoe_rev2"
   },
   "last_checked": "2026-06-23T01:59:33.424382+00:00"
 }
