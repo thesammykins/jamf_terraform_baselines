@@ -1,0 +1,67 @@
+name: Compliance Baseline Release
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - 'docs/compliance-changelogs/*.md'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: compliance-release-${{ github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Publish baseline release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+
+      - name: Create releases for new changelogs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          SHA: ${{ github.sha }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          set -euo pipefail
+
+          mapfile -t changelogs < <(
+            git diff --name-only "$BEFORE" "$SHA" -- 'docs/compliance-changelogs/*.md' | sort
+          )
+
+          if [ "${#changelogs[@]}" -eq 0 ]; then
+            echo "No compliance changelog files changed."
+            exit 0
+          fi
+
+          for path in "${changelogs[@]}"; do
+            stem="$(basename "$path" .md)"
+            tag="compliance-${stem}"
+            title="Compliance baseline update: ${stem}"
+            body="$(mktemp)"
+
+            {
+              echo "# ${title}"
+              echo
+              echo "Full changelog: https://github.com/${REPOSITORY}/blob/${SHA}/${path}"
+              echo
+              cat "$path"
+            } > "$body"
+
+            if gh release view "$tag" >/dev/null 2>&1; then
+              echo "Release $tag already exists; skipping."
+              continue
+            fi
+
+            gh release create "$tag" \
+              --title "$title" \
+              --notes-file "$body" \
+              --target "$SHA"
+          done
