@@ -48,21 +48,21 @@ jobs:
             --output new-releases.json
 
           # Set step outputs for downstream jobs
-          python3 -c "
-import json
+          python3 <<'PY' >> "$GITHUB_OUTPUT"
+          import json
 
-with open('new-releases.json') as f:
-    data = json.load(f)
+          with open("new-releases.json", encoding="utf-8") as f:
+              data = json.load(f)
 
-# Branches with new releases (for matrix)
-releases = data.get('new_releases', [])
-branches = [r['branch'] for r in releases]
-print(f'branches={json.dumps(branches)}')
+          # Branches with new releases (for matrix)
+          releases = data.get("new_releases", [])
+          branches = [r["branch"] for r in releases]
+          print(f"branches={json.dumps(branches)}")
 
-# Per-branch latest tags (for checkout in generate job)
-for branch, tag in data.get('branches', {}).items():
-    print(f'{branch}_tag={tag}')
-" >> $GITHUB_OUTPUT
+          # Per-branch latest tags (for checkout in generate job)
+          for branch, tag in data.get("branches", {}).items():
+              print(f"{branch}_tag={tag}")
+          PY
 
       - name: Upload revision state
         uses: actions/upload-artifact@v4
@@ -80,8 +80,6 @@ for branch, tag in data.get('branches', {}).items():
     container: ghcr.io/usnistgov/mscp_2.0:latest
     steps:
       - uses: actions/checkout@v7
-        with:
-          ref: ${{ github.head_ref }}
 
       - name: Download revision state
         uses: actions/download-artifact@v4
