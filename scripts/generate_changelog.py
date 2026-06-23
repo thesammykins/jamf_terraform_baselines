@@ -1,35 +1,37 @@
 #!/usr/bin/env python3
-"""Generate a rule-level changelog between mSCP revisions.
+"""Generate reviewer-friendly changelogs for mSCP baseline updates.
 
-Compares the current state of generated compliance modules against a
-previous recorded state (or git history) to identify rules that were
-ADDED, REMOVED, or MODIFIED in a new mSCP release.
+The workflow needs two artifacts:
 
-Output is a markdown table suitable for inclusion in a PR body.
+* a concise PR body that stays well below GitHub's body limit
+* a full committed changelog for audit/review of large upstream releases
 
-Typical usage:
-    python generate_changelog.py \\
-        --mscp-path /tmp/mscp \\
-        --branch tahoe \\
-        --output changelog.md
+The durable state file stores rule IDs, sections, and comparable metadata so
+future releases can report real additions/removals/moves/metadata changes
+instead of flooding the PR with every common rule.
 """
 
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import re
 import subprocess
 import sys
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Dict, List, Tuple
+from typing import Any, Dict, Iterable, List, Optional
 
-# Import shared constants from the generator
 try:
     from generate_tf_compliance import (  # type: ignore[import-untyped]
         BASELINE_FILENAME_MAP,
         SUPPORTED_BASELINES,
         SUPPORTED_VERSIONS,
+        find_rule_yaml,
         parse_baseline_yaml,
+        parse_rule_yaml,
+        parse_version_yaml,
         resolve_baselines_dir,
         resolve_rules_dir,
     )
@@ -39,7 +41,10 @@ except ImportError:
             BASELINE_FILENAME_MAP,
             SUPPORTED_BASELINES,
             SUPPORTED_VERSIONS,
+            find_rule_yaml,
             parse_baseline_yaml,
+            parse_rule_yaml,
+            parse_version_yaml,
             resolve_baselines_dir,
             resolve_rules_dir,
         )
@@ -52,11 +57,76 @@ except ImportError:
         sys.exit(1)
 
 
-# ---------------------------------------------------------------------------
-# State management
-# ---------------------------------------------------------------------------
-
 STATE_FILE = ".ci/mscp-rule-state.json"
+DEFAULT_SUMMARY_LIMIT = 20_000
+SUMMARY_SAMPLE_LIMIT = 12
+TRACKED_METADATA_FIELDS = (
+    "title",
+    "severity",
+    "references",
+    "odv",
+    "mobileconfig",
+    "tags",
+)
+
+
+@dataclass
+class RuleSnapshot:
+    """Comparable rule state for one rule in one baseline."""
+
+    id: str
+    title: str
+    section: str
+    metadata: Dict[str, Any]
+    metadata_hash: str
+
+
+@dataclass
+class ModuleDiff:
+    """Rule changes for one baseline and macOS version."""
+
+    baseline_key: str
+    display_name: str
+    macos_version: str
+    initialized: bool = False
+    added: List[RuleSnapshot] = field(default_factory=list)
+    removed: List[RuleSnapshot] = field(default_factory=list)
+    moved: List[RuleSnapshot] = field(default_factory=list)
+    metadata_changed: List[RuleSnapshot] = field(default_factory=list)
+
+    @property
+    def module_key(self) -> str:
+        return f"{self.baseline_key}/macos_{self.macos_version}"
+
+    @property
+    def changed_count(self) -> int:
+        return (
+            len(self.added)
+            + len(self.removed)
+            + len(self.moved)
+            + len(self.metadata_changed)
+        )
+
+    @property
+    def rule_count(self) -> int:
+        return len({rule.id for rule in self.current_rules})
+
+    @property
+    def current_rules(self) -> List[RuleSnapshot]:
+        return self.added + self.moved + self.metadata_changed
+
+
+@dataclass
+class ChangelogResult:
+    """All output data for a changelog run."""
+
+    branch: str
+    old_revision: str
+    new_revision: str
+    full_changelog_path: Path
+    summary_path: Path
+    module_diffs: List[ModuleDiff]
+    initialized_modules: List[ModuleDiff]
 
 
 def _import_yaml() -> Any:
@@ -72,251 +142,478 @@ def _import_yaml() -> Any:
     return yaml
 
 
-def load_previous_state(
-    output_dir: Path, branch: str
-) -> Dict[str, List[str]]:
-    """Load the previous rule state from the state file or git history.
-
-    Args:
-        output_dir: Base output directory (``modules/compliance``).
-        branch: mSCP branch name (e.g. ``"tahoe"``).
-
-    Returns:
-        Dict mapping ``"baseline_key/macos_version"`` → list of rule IDs.
-    """
-    state_path = Path(STATE_FILE)
-    if state_path.is_file():
-        try:
-            with open(state_path, "r", encoding="utf-8") as fh:
-                return json.load(fh)  # type: ignore[no-any-return]
-        except (json.JSONDecodeError, KeyError):
-            pass
-
-    # Fallback: try reading from committed module files via git
-    return _read_previous_from_git(output_dir, branch)
+def _json_hash(data: Dict[str, Any]) -> str:
+    """Return a stable hash for comparable metadata."""
+    payload = json.dumps(data, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _read_previous_from_git(
-    output_dir: Path, branch: str
-) -> Dict[str, List[str]]:
-    """Read previous rule lists from git HEAD.
+def _normalise_revision(version_info: Dict[str, str], branch: str) -> str:
+    """Return the release tag-like revision used in artifact names."""
+    revision = str(version_info.get("revision", "unknown"))
+    if revision.startswith(f"{branch}_rev"):
+        return revision
 
-    Attempts to parse ``main.tf`` from the last commit to extract rule IDs
-    from the ``locals.all_rules`` block.
+    match = re.search(r"rev(?:ision)?\s*([0-9]+(?:\.[0-9]+)?)", revision, re.I)
+    if match:
+        value = match.group(1).split(".")[0]
+        return f"{branch}_rev{value}"
 
-    Args:
-        output_dir: Base output directory.
-        branch: mSCP branch (used to filter relevant versions).
+    match = re.search(r"([0-9]+)(?:\.[0-9]+)?$", revision)
+    if match:
+        return f"{branch}_rev{match.group(1)}"
 
-    Returns:
-        Dict mapping module path → list of rule IDs.
-    """
-    previous: Dict[str, List[str]] = {}
-    try:
-        result = subprocess.run(
-            [
-                "git",
-                "--no-pager",
-                "show",
-                "HEAD:modules/compliance",
-            ],
-            capture_output=True,
-            text=True,
-            cwd=output_dir.parent if output_dir.parent.is_dir() else Path.cwd(),
-        )
-        if result.returncode != 0:
-            return previous
-        # Simple fallback: read the state file from previous commit
-        result2 = subprocess.run(
-            [
-                "git",
-                "--no-pager",
-                "show",
-                f"HEAD:{STATE_FILE}",
-            ],
-            capture_output=True,
-            text=True,
-            cwd=Path.cwd(),
-        )
-        if result2.returncode == 0:
-            return json.loads(result2.stdout)
-    except (subprocess.SubprocessError, FileNotFoundError):
-        pass
-    return previous
+    return revision
 
 
-def save_current_state(
-    baseline_key: str,
-    ver_major: str,
-    rule_ids: List[str],
-    state: Dict[str, List[str]],
-) -> None:
-    """Record the current rule IDs for a module into the state dict.
-
-    Args:
-        baseline_key: Baseline identifier.
-        ver_major: macOS major version string.
-        rule_ids: List of current rule IDs.
-        state: Mutable state dict to update.
-    """
-    key = f"{baseline_key}/macos_{ver_major}"
-    state[key] = sorted(rule_ids)
+def _display_revision(value: str) -> str:
+    """Use a readable placeholder for missing previous state."""
+    return value if value else "none"
 
 
-# ---------------------------------------------------------------------------
-# Changelog computation
-# ---------------------------------------------------------------------------
+def _safe_artifact_stem(branch: str, revision: str) -> str:
+    """Build a filesystem-safe changelog basename."""
+    raw = f"{branch}_{revision}"
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", raw).strip("_") or "mscp_update"
 
 
-def compute_diff(
-    previous: List[str],
-    current: List[str],
-) -> Tuple[List[str], List[str], List[str]]:
-    """Compute ADDED, REMOVED, and MODIFIED rule IDs between two lists.
-
-    Args:
-        previous: Rule IDs from the previous revision.
-        current: Rule IDs from the current revision.
-
-    Returns:
-        Tuple of ``(added, removed, modified)`` where ``modified``
-        includes rule IDs present in both lists (further inspection
-        needed to confirm actual modification of rule content).
-    """
-    prev_set = set(previous)
-    curr_set = set(current)
-
-    added = sorted(curr_set - prev_set)
-    removed = sorted(prev_set - curr_set)
-    # Rules present in both are candidates for MODIFIED
-    common = sorted(prev_set & curr_set)
-
-    return added, removed, common
-
-
-def extract_rule_ids_from_profile(baseline_data: Dict[str, Any]) -> List[str]:
-    """Extract rule IDs from mSCP baseline profile shapes.
-
-    Supports both the current list-based profile format and the older
-    dict-with-section format.
-    """
+def extract_profile_entries(baseline_data: Dict[str, Any]) -> List[Dict[str, str]]:
+    """Flatten supported mSCP baseline profile shapes to rule/section entries."""
     profile: Any = baseline_data.get("profile", [])
-    rule_ids: List[str] = []
+    entries: List[Dict[str, str]] = []
 
     if isinstance(profile, list):
         for entry in profile:
             if isinstance(entry, dict):
-                rules: Any = entry.get("rules", [])
+                section = str(entry.get("section", "unknown"))
+                rules = entry.get("rules", [])
                 if isinstance(rules, list):
-                    rule_ids.extend(str(rule_id) for rule_id in rules)
+                    entries.extend(
+                        {"id": str(rule_id), "section": section}
+                        for rule_id in rules
+                    )
     elif isinstance(profile, dict):
-        sections: Any = profile.get("section", [])
+        sections = profile.get("section", [])
         if isinstance(sections, list):
-            for section in sections:
-                if isinstance(section, dict):
-                    rules = section.get("rules", [])
+            for section_entry in sections:
+                if isinstance(section_entry, dict):
+                    section = str(section_entry.get("section", "unknown"))
+                    rules = section_entry.get("rules", [])
                     if isinstance(rules, list):
-                        rule_ids.extend(str(rule_id) for rule_id in rules)
+                        entries.extend(
+                            {"id": str(rule_id), "section": section}
+                            for rule_id in rules
+                        )
 
-    return rule_ids
+    return entries
 
 
-def generate_changelog_markdown(
+def extract_rule_ids_from_profile(baseline_data: Dict[str, Any]) -> List[str]:
+    """Extract rule IDs from supported mSCP baseline profile shapes."""
+    return [entry["id"] for entry in extract_profile_entries(baseline_data)]
+
+
+def _tracked_metadata(rule_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Return the rule metadata fields that should affect changelog diffs."""
+    return {
+        key: rule_data.get(key)
+        for key in TRACKED_METADATA_FIELDS
+        if key in rule_data
+    }
+
+
+def build_rule_snapshots(
+    baseline_data: Dict[str, Any],
+    rules_dir: Path,
+) -> Dict[str, RuleSnapshot]:
+    """Build comparable rule snapshots for a baseline."""
+    snapshots: Dict[str, RuleSnapshot] = {}
+
+    for entry in extract_profile_entries(baseline_data):
+        rule_id = entry["id"]
+        rule_path = find_rule_yaml(rules_dir, rule_id)
+        rule_data: Dict[str, Any] = {}
+        if rule_path is not None:
+            rule_data = parse_rule_yaml(rule_path)
+
+        title = str(rule_data.get("title", rule_id))
+        metadata = _tracked_metadata(rule_data)
+        snapshots[rule_id] = RuleSnapshot(
+            id=rule_id,
+            title=title,
+            section=entry["section"],
+            metadata=metadata,
+            metadata_hash=_json_hash(metadata),
+        )
+
+    return snapshots
+
+
+def _state_module_to_snapshots(module_data: Any) -> Dict[str, RuleSnapshot]:
+    """Read one module from either legacy or structured state."""
+    if isinstance(module_data, list):
+        return {
+            str(rule_id): RuleSnapshot(
+                id=str(rule_id),
+                title=str(rule_id),
+                section="unknown",
+                metadata={},
+                metadata_hash="",
+            )
+            for rule_id in module_data
+        }
+
+    if not isinstance(module_data, dict):
+        return {}
+
+    rules = module_data.get("rules", {})
+    if not isinstance(rules, dict):
+        return {}
+
+    snapshots: Dict[str, RuleSnapshot] = {}
+    for rule_id, rule_data in rules.items():
+        if not isinstance(rule_data, dict):
+            continue
+        metadata = rule_data.get("metadata", {})
+        if not isinstance(metadata, dict):
+            metadata = {}
+        snapshots[str(rule_id)] = RuleSnapshot(
+            id=str(rule_id),
+            title=str(rule_data.get("title", rule_id)),
+            section=str(rule_data.get("section", "unknown")),
+            metadata=metadata,
+            metadata_hash=str(rule_data.get("metadata_hash", "")),
+        )
+    return snapshots
+
+
+def load_previous_state(state_path: Path = Path(STATE_FILE)) -> Dict[str, Any]:
+    """Load the previous structured rule state, falling back to git history."""
+    if state_path.is_file():
+        try:
+            with state_path.open("r", encoding="utf-8") as fh:
+                loaded: Dict[str, Any] = json.load(fh)
+            return loaded
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    return _read_previous_state_from_git()
+
+
+def _read_previous_state_from_git() -> Dict[str, Any]:
+    """Read the rule state file from HEAD if it exists."""
+    try:
+        result = subprocess.run(
+            ["git", "--no-pager", "show", f"HEAD:{STATE_FILE}"],
+            capture_output=True,
+            text=True,
+            cwd=Path.cwd(),
+            check=False,
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            loaded: Dict[str, Any] = json.loads(result.stdout)
+            return loaded
+    except (subprocess.SubprocessError, FileNotFoundError, json.JSONDecodeError):
+        pass
+    return {}
+
+
+def _previous_modules(previous_state: Dict[str, Any]) -> Dict[str, Any]:
+    """Return module state supporting legacy and v2 state shapes."""
+    modules = previous_state.get("modules")
+    if isinstance(modules, dict):
+        return modules
+    return previous_state
+
+
+def _previous_revision(previous_state: Dict[str, Any], branch: str) -> str:
+    """Read previous revision for a branch from rule state when available."""
+    branches = previous_state.get("branches")
+    if isinstance(branches, dict):
+        value = branches.get(branch)
+        if value is not None:
+            return str(value)
+    return ""
+
+
+def _snapshot_to_state(snapshot: RuleSnapshot) -> Dict[str, Any]:
+    """Serialize a rule snapshot to durable JSON state."""
+    return {
+        "title": snapshot.title,
+        "section": snapshot.section,
+        "metadata": snapshot.metadata,
+        "metadata_hash": snapshot.metadata_hash,
+    }
+
+
+def compute_module_diff(
     baseline_key: str,
-    ver_major: str,
-    ver_meta: Dict[str, str],
-    old_revision: str,
-    new_revision: str,
-    added: List[str],
-    removed: List[str],
-    modified: List[str],
-    rule_titles: Dict[str, str],
-) -> str:
-    """Format a markdown changelog table for one baseline × version.
+    display_name: str,
+    macos_version: str,
+    previous_rules: Dict[str, RuleSnapshot],
+    current_rules: Dict[str, RuleSnapshot],
+) -> ModuleDiff:
+    """Compare previous and current rule snapshots for one module."""
+    diff = ModuleDiff(
+        baseline_key=baseline_key,
+        display_name=display_name,
+        macos_version=macos_version,
+        initialized=not previous_rules,
+    )
 
-    Args:
-        baseline_key: Baseline identifier.
-        ver_major: macOS major version.
-        ver_meta: Version metadata dict (name, branch, etc.).
-        old_revision: Previous mSCP revision tag.
-        new_revision: New mSCP revision tag.
-        added: Rule IDs added.
-        removed: Rule IDs removed.
-        modified: Rule IDs present in both (candidates for modification).
-        rule_titles: Mapping of rule ID → title.
+    previous_ids = set(previous_rules)
+    current_ids = set(current_rules)
 
-    Returns:
-        Markdown string with changelog table.
-    """
-    display = SUPPORTED_BASELINES.get(
-        baseline_key, {}
-    ).get("display_name", baseline_key)
+    if diff.initialized:
+        return diff
 
-    lines: List[str] = [
-        f"## Rule Changes — {display} (macOS {ver_major}) — {old_revision} → {new_revision}",
-        "",
-        "| Change | Rule ID | Title |",
-        "|--------|---------|-------|",
+    for rule_id in sorted(current_ids - previous_ids):
+        diff.added.append(current_rules[rule_id])
+
+    for rule_id in sorted(previous_ids - current_ids):
+        diff.removed.append(previous_rules[rule_id])
+
+    for rule_id in sorted(previous_ids & current_ids):
+        previous = previous_rules[rule_id]
+        current = current_rules[rule_id]
+        if previous.section != current.section:
+            diff.moved.append(current)
+        elif previous.metadata_hash != current.metadata_hash:
+            diff.metadata_changed.append(current)
+
+    return diff
+
+
+def generate_state(
+    branch: str,
+    revision: str,
+    modules: Dict[str, Dict[str, RuleSnapshot]],
+    previous_state: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Build the durable rule state payload."""
+    previous_branches = previous_state.get("branches", {})
+    branches = dict(previous_branches) if isinstance(previous_branches, dict) else {}
+    branches[branch] = revision
+
+    return {
+        "schema_version": 2,
+        "branches": branches,
+        "modules": {
+            module_key: {
+                "rules": {
+                    rule_id: _snapshot_to_state(snapshot)
+                    for rule_id, snapshot in sorted(rule_snapshots.items())
+                }
+            }
+            for module_key, rule_snapshots in sorted(modules.items())
+        },
+    }
+
+
+def _table_rows(rules: Iterable[RuleSnapshot], change: str) -> List[str]:
+    """Format full changelog rows for a change group."""
+    return [
+        f"| {change} | `{rule.id}` | {rule.title} | {rule.section} |"
+        for rule in rules
     ]
 
-    for rid in added:
-        title = rule_titles.get(rid, rid)
-        lines.append(f"| ADDED | {rid} | {title} |")
 
-    for rid in removed:
-        title = rule_titles.get(rid, rid)
-        lines.append(f"| REMOVED | {rid} | {title} |")
+def generate_full_changelog_markdown(result: ChangelogResult) -> str:
+    """Format the complete detailed changelog artifact."""
+    lines = [
+        f"# mSCP Compliance Changelog: {result.branch} {result.new_revision}",
+        "",
+        f"- **Branch**: `{result.branch}`",
+        f"- **Previous revision**: `{_display_revision(result.old_revision)}`",
+        f"- **New revision**: `{result.new_revision}`",
+        f"- **Modules initialized**: {len(result.initialized_modules)}",
+        f"- **Modules with changes**: {len(result.module_diffs)}",
+        "",
+        "## Summary by Baseline",
+        "",
+        "| Baseline | macOS | Added | Removed | Moved | Metadata changed |",
+        "|----------|-------|-------|---------|-------|------------------|",
+    ]
 
-    for rid in modified:
-        title = rule_titles.get(rid, rid)
-        lines.append(f"| MODIFIED | {rid} | {title} |")
+    if not result.module_diffs and not result.initialized_modules:
+        lines.append("| *(none)* | *(none)* | 0 | 0 | 0 | 0 |")
 
-    if not added and not removed and not modified:
-        lines.append("| *(none)* | *(none)* | *(none)* |")
+    for diff in result.module_diffs:
+        lines.append(
+            "| "
+            f"{diff.display_name} | {diff.macos_version} | "
+            f"{len(diff.added)} | {len(diff.removed)} | {len(diff.moved)} | "
+            f"{len(diff.metadata_changed)} |"
+        )
+
+    if result.initialized_modules:
+        lines.extend(["", "## Baseline State Initialized", ""])
+        for diff in result.initialized_modules:
+            lines.append(
+                f"- {diff.display_name} macOS {diff.macos_version}: "
+                "first tracked state captured; future runs will report deltas."
+            )
+
+    for diff in result.module_diffs:
+        lines.extend(
+            [
+                "",
+                f"## {diff.display_name} (macOS {diff.macos_version})",
+                "",
+                "| Change | Rule ID | Title | Section |",
+                "|--------|---------|-------|---------|",
+            ]
+        )
+        rows: List[str] = []
+        rows.extend(_table_rows(diff.added, "ADDED"))
+        rows.extend(_table_rows(diff.removed, "REMOVED"))
+        rows.extend(_table_rows(diff.moved, "MOVED"))
+        rows.extend(_table_rows(diff.metadata_changed, "METADATA_CHANGED"))
+        lines.extend(rows or ["| *(none)* | *(none)* | *(none)* | *(none)* |"])
 
     lines.append("")
     return "\n".join(lines)
 
 
-# ---------------------------------------------------------------------------
-# Orchestration
-# ---------------------------------------------------------------------------
+def _sample_rules(rules: List[RuleSnapshot]) -> str:
+    """Return a concise comma-separated sample of rule IDs."""
+    if not rules:
+        return "none"
+    sample = [f"`{rule.id}`" for rule in rules[:SUMMARY_SAMPLE_LIMIT]]
+    if len(rules) > SUMMARY_SAMPLE_LIMIT:
+        sample.append(f"... +{len(rules) - SUMMARY_SAMPLE_LIMIT} more")
+    return ", ".join(sample)
 
 
-def generate_changelog(
+def _risk_notes(module_diffs: List[ModuleDiff]) -> List[str]:
+    """Build short reviewer risk notes from the diff shape."""
+    notes: List[str] = []
+    if any(diff.removed for diff in module_diffs):
+        notes.append("Rules were removed from at least one baseline; review exemptions and expectations.")
+    if any(diff.added for diff in module_diffs):
+        notes.append("New rules were added; review default enablement and possible operational impact.")
+    if any(diff.metadata_changed for diff in module_diffs):
+        notes.append("Rule metadata changed; review ODV/reference/severity-sensitive controls.")
+    if any(diff.moved for diff in module_diffs):
+        notes.append("Rules moved sections; verify generated grouping remains reviewable.")
+    return notes
+
+
+def generate_summary_markdown(result: ChangelogResult, max_chars: int) -> str:
+    """Format a concise PR body summary under a fixed character budget."""
+    full_path = result.full_changelog_path.as_posix()
+    total_added = sum(len(diff.added) for diff in result.module_diffs)
+    total_removed = sum(len(diff.removed) for diff in result.module_diffs)
+    total_moved = sum(len(diff.moved) for diff in result.module_diffs)
+    total_metadata = sum(len(diff.metadata_changed) for diff in result.module_diffs)
+
+    lines = [
+        f"# mSCP {result.branch} Compliance Update",
+        "",
+        f"- **Previous revision**: `{_display_revision(result.old_revision)}`",
+        f"- **New revision**: `{result.new_revision}`",
+        f"- **Full changelog**: [{full_path}]({full_path})",
+        f"- **Initialized modules**: {len(result.initialized_modules)}",
+        f"- **Modules with changes**: {len(result.module_diffs)}",
+        "",
+        "## Totals",
+        "",
+        "| Added | Removed | Moved | Metadata changed |",
+        "|-------|---------|-------|------------------|",
+        f"| {total_added} | {total_removed} | {total_moved} | {total_metadata} |",
+        "",
+        "## Review Notes",
+        "",
+    ]
+
+    notes = _risk_notes(result.module_diffs)
+    lines.extend([f"- {note}" for note in notes] or ["- No rule deltas detected."])
+
+    if result.initialized_modules:
+        lines.extend(
+            [
+                "- Rule-state tracking was initialized for one or more modules; "
+                "future releases will report exact deltas.",
+            ]
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Baseline Summary",
+            "",
+            "| Baseline | macOS | Added | Removed | Moved | Metadata changed |",
+            "|----------|-------|-------|---------|-------|------------------|",
+        ]
+    )
+
+    for diff in result.module_diffs:
+        candidate = (
+            "| "
+            f"{diff.display_name} | {diff.macos_version} | "
+            f"{len(diff.added)} | {len(diff.removed)} | {len(diff.moved)} | "
+            f"{len(diff.metadata_changed)} |"
+        )
+        if len("\n".join(lines + [candidate])) > max_chars:
+            lines.append("| *(truncated)* | *(see full changelog)* | - | - | - | - |")
+            break
+        lines.append(candidate)
+
+    lines.extend(["", "## Notable Samples", ""])
+    if result.module_diffs:
+        for diff in result.module_diffs[:8]:
+            block = [
+                f"### {diff.display_name} (macOS {diff.macos_version})",
+                f"- Added: {_sample_rules(diff.added)}",
+                f"- Removed: {_sample_rules(diff.removed)}",
+                f"- Moved: {_sample_rules(diff.moved)}",
+                f"- Metadata changed: {_sample_rules(diff.metadata_changed)}",
+                "",
+            ]
+            if len("\n".join(lines + block)) > max_chars:
+                lines.append("Additional samples omitted; see the full changelog.")
+                break
+            lines.extend(block)
+    else:
+        lines.append("No rule deltas detected.")
+
+    summary = "\n".join(lines).rstrip() + "\n"
+    if len(summary) > max_chars:
+        footer = f"\n\nFull details: [{full_path}]({full_path})\n"
+        summary = summary[: max_chars - len(footer) - 32].rstrip()
+        summary += "\n\nSummary truncated for GitHub body size." + footer
+    return summary
+
+
+def _target_versions(branch: str) -> Iterable[tuple[str, Dict[str, str]]]:
+    """Yield supported versions matching a branch filter."""
+    for version, metadata in SUPPORTED_VERSIONS.items():
+        if branch == "all" or metadata["branch"] == branch:
+            yield version, metadata
+
+
+def build_changelog_result(
     mscp_path: Path,
-    output_dir: Path,
     branch: str,
-) -> str:
-    """Generate a full changelog comparing current vs previous rule state.
-
-    Args:
-        mscp_path: Root of cloned mSCP repository.
-        output_dir: Base output directory (``modules/compliance``).
-        branch: mSCP branch name or ``"all"``.
-
-    Returns:
-        Combined markdown changelog string.
-    """
-    yaml = _import_yaml()
+    full_changelog_path: Path,
+    summary_path: Path,
+) -> tuple[ChangelogResult, Dict[str, Any]]:
+    """Compute changelog result and next durable state."""
     baselines_dir = resolve_baselines_dir(mscp_path)
     rules_dir = resolve_rules_dir(mscp_path)
+    version_info = parse_version_yaml(mscp_path)
+    effective_branch = branch if branch != "all" else version_info.get("branch", "all")
+    new_revision = _normalise_revision(version_info, effective_branch)
 
-    previous_state = load_previous_state(output_dir, branch)
-    current_state: Dict[str, List[str]] = {}
-    changelog_parts: List[str] = []
-    old_revision = "unknown"
-    new_revision = "unknown"
+    previous_state = load_previous_state()
+    previous_modules = _previous_modules(previous_state)
+    old_revision = _previous_revision(previous_state, effective_branch)
 
-    # Try to read version info
-    version_file = mscp_path / "VERSION.yaml"
-    if version_file.is_file():
-        with open(version_file, "r", encoding="utf-8") as fh:
-            version_data = yaml.safe_load(fh) or {}
-        new_revision = str(version_data.get("revision", "unknown"))
-        old_revision = "previous"
+    current_modules: Dict[str, Dict[str, RuleSnapshot]] = {}
+    module_diffs: List[ModuleDiff] = []
+    initialized_modules: List[ModuleDiff] = []
 
-    for baseline_key in SUPPORTED_BASELINES:
+    for baseline_key, baseline_meta in SUPPORTED_BASELINES.items():
         baseline_file = baselines_dir / BASELINE_FILENAME_MAP.get(
             baseline_key, f"{baseline_key}.yaml"
         )
@@ -324,70 +621,92 @@ def generate_changelog(
             continue
 
         baseline_data = parse_baseline_yaml(baseline_file)
+        current_rules = build_rule_snapshots(baseline_data, rules_dir)
 
-        for ver_major, ver_meta in SUPPORTED_VERSIONS.items():
-            if branch != "all" and ver_meta["branch"] != branch:
-                continue
-
-            current_rule_ids = extract_rule_ids_from_profile(baseline_data)
-
-            key = f"{baseline_key}/macos_{ver_major}"
-            prev_ids = previous_state.get(key, [])
-
-            added, removed, common = compute_diff(prev_ids, current_rule_ids)
-
-            # Build rule title map for current rules
-            rule_titles: Dict[str, str] = {}
-            for rid in current_rule_ids:
-                from generate_tf_compliance import find_rule_yaml, parse_rule_yaml
-
-                rp = find_rule_yaml(rules_dir, rid)
-                if rp is not None:
-                    rd = parse_rule_yaml(rp)
-                    rule_titles[rid] = rd.get("title", rid)
-                else:
-                    rule_titles[rid] = rid
-
-            # All common rules are marked as modified for now
-            if added or removed or common:
-                part = generate_changelog_markdown(
-                    baseline_key=baseline_key,
-                    ver_major=ver_major,
-                    ver_meta=ver_meta,
-                    old_revision=old_revision,
-                    new_revision=new_revision,
-                    added=added,
-                    removed=removed,
-                    modified=common,
-                    rule_titles=rule_titles,
-                )
-                changelog_parts.append(part)
-
-            save_current_state(
-                baseline_key, ver_major, current_rule_ids, current_state
+        for version, version_meta in _target_versions(branch):
+            module_key = f"{baseline_key}/macos_{version}"
+            current_modules[module_key] = current_rules
+            previous_rules = _state_module_to_snapshots(
+                previous_modules.get(module_key, {})
             )
+            diff = compute_module_diff(
+                baseline_key=baseline_key,
+                display_name=baseline_meta["display_name"],
+                macos_version=version,
+                previous_rules=previous_rules,
+                current_rules=current_rules,
+            )
+            if diff.initialized:
+                initialized_modules.append(diff)
+            elif diff.changed_count > 0:
+                module_diffs.append(diff)
 
-    # Write state for next run
-    state_dir = Path(STATE_FILE).parent
-    state_dir.mkdir(parents=True, exist_ok=True)
-    with open(STATE_FILE, "w", encoding="utf-8") as fh:
-        json.dump(current_state, fh, indent=2, sort_keys=True)
+    result = ChangelogResult(
+        branch=effective_branch,
+        old_revision=old_revision,
+        new_revision=new_revision,
+        full_changelog_path=full_changelog_path,
+        summary_path=summary_path,
+        module_diffs=module_diffs,
+        initialized_modules=initialized_modules,
+    )
+    next_state = generate_state(
+        branch=effective_branch,
+        revision=new_revision,
+        modules=current_modules,
+        previous_state=previous_state,
+    )
+    return result, next_state
 
-    if not changelog_parts:
-        return "No rule changes detected across any baseline × version combinations.\n"
 
-    return "\n".join(changelog_parts)
+def write_changelog_outputs(
+    mscp_path: Path,
+    branch: str,
+    full_output: Optional[Path],
+    summary_output: Path,
+    summary_limit: int = DEFAULT_SUMMARY_LIMIT,
+) -> ChangelogResult:
+    """Generate and write full changelog, summary, and durable state."""
+    version_info = parse_version_yaml(mscp_path)
+    effective_branch = branch if branch != "all" else version_info.get("branch", "all")
+    revision = _normalise_revision(version_info, effective_branch)
+    if full_output is None:
+        stem = _safe_artifact_stem(effective_branch, revision)
+        full_output = Path("docs/compliance-changelogs") / f"{stem}.md"
 
+    result, next_state = build_changelog_result(
+        mscp_path=mscp_path,
+        branch=branch,
+        full_changelog_path=full_output,
+        summary_path=summary_output,
+    )
 
-# ---------------------------------------------------------------------------
-# CLI
-# ---------------------------------------------------------------------------
+    full_changelog = generate_full_changelog_markdown(result)
+    summary = generate_summary_markdown(result, summary_limit)
+
+    full_output.parent.mkdir(parents=True, exist_ok=True)
+    full_output.write_text(full_changelog, encoding="utf-8")
+
+    summary_output.parent.mkdir(parents=True, exist_ok=True)
+    summary_output.write_text(summary, encoding="utf-8")
+
+    state_path = Path(STATE_FILE)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    state_path.write_text(
+        json.dumps(next_state, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+
+    print(f"Full changelog written to: {full_output}")
+    print(f"Summary written to: {summary_output}")
+    print(f"Rule state written to: {state_path}")
+    return result
 
 
 def _build_argparser() -> argparse.ArgumentParser:
     """Construct the command-line argument parser."""
     parser = argparse.ArgumentParser(
-        description="Generate a rule-level changelog between mSCP revisions.",
+        description="Generate full and summary changelogs between mSCP revisions.",
     )
     parser.add_argument(
         "--mscp-path",
@@ -398,13 +717,25 @@ def _build_argparser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--branch",
         required=True,
-        help="mSCP branch to generate changelog for (tahoe, sequoia, sonoma, or 'all')",
+        help="mSCP branch to generate changelog for (tahoe, sequoia, sonoma, or all)",
     )
     parser.add_argument(
         "--output",
-        required=True,
         type=Path,
-        help="Path to write the markdown changelog",
+        default=None,
+        help="Path to write the full markdown changelog",
+    )
+    parser.add_argument(
+        "--summary-output",
+        type=Path,
+        default=Path("changelog-summary.md"),
+        help="Path to write the concise PR summary markdown",
+    )
+    parser.add_argument(
+        "--summary-limit",
+        type=int,
+        default=DEFAULT_SUMMARY_LIMIT,
+        help="Maximum PR summary characters",
     )
     return parser
 
@@ -415,27 +746,17 @@ def main() -> None:
     args = parser.parse_args()
 
     mscp_path: Path = args.mscp_path
-    branch: str = args.branch
-    output_path: Path = args.output
-
     if not mscp_path.is_dir():
         print(f"Error: mSCP path does not exist: {mscp_path}", file=sys.stderr)
         sys.exit(1)
 
-    # Determine output_dir: assume modules/compliance relative to CWD
-    output_dir = Path("modules/compliance")
-    if not output_dir.is_dir():
-        output_dir = output_path.parent / "modules" / "compliance"
-
-    changelog = generate_changelog(
+    write_changelog_outputs(
         mscp_path=mscp_path,
-        output_dir=output_dir,
-        branch=branch,
+        branch=args.branch,
+        full_output=args.output,
+        summary_output=args.summary_output,
+        summary_limit=args.summary_limit,
     )
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(changelog, encoding="utf-8")
-    print(f"Changelog written to: {output_path}")
 
 
 if __name__ == "__main__":

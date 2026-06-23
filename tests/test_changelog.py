@@ -1,95 +1,155 @@
-"""
-Unit tests for scripts/generate_changelog.py — the per-PR changelog generator.
+"""Tests for scripts/generate_changelog.py."""
 
-These tests validate that the changelog generator correctly:
-- Detects newly added rules (ADDED)
-- Detects removed rules (REMOVED)
-- Groups common rules as candidates for modification (MODIFIED)
-- Handles the no-change case correctly
-- Produces valid markdown output matching the expected PR body format
-"""
+import json
+from pathlib import Path
 
 from scripts.generate_changelog import (
-    compute_diff,
+    RuleSnapshot,
+    compute_module_diff,
+    extract_profile_entries,
     extract_rule_ids_from_profile,
-    generate_changelog_markdown,
+    write_changelog_outputs,
 )
 
-# ── Mock data fixtures ─────────────────────────────────────────────────
 
-PREVIOUS_RULES = [
-    "os_gatekeeper_enable",
-    "os_sip_enable",
-    "os_dictation_disable",
-    "system_settings_screensaver_password_enforce",
-    "system_settings_software_update_enforce",
-    "pwpolicy_account_lockout_enforce",
-]
-
-CURRENT_RULES = [
-    "os_gatekeeper_enable",
-    "os_sip_enable",
-    "os_loginwindow_adminhostinfo_disabled",  # ADDED
-    "os_safari_clear_history_disable",       # ADDED
-    "system_settings_screensaver_password_enforce",
-    "pwpolicy_account_lockout_enforce",
-    # os_dictation_disable REMOVED
-    # system_settings_software_update_enforce REMOVED
-]
-
-IDENTICAL_RULES = PREVIOUS_RULES  # Same rules, no changes
+def _snapshot(
+    rule_id: str,
+    section: str = "macos",
+    metadata_hash: str = "same",
+) -> RuleSnapshot:
+    return RuleSnapshot(
+        id=rule_id,
+        title=f"Title for {rule_id}",
+        section=section,
+        metadata={"title": f"Title for {rule_id}"},
+        metadata_hash=metadata_hash,
+    )
 
 
-# ── Test: Changelog computation ────────────────────────────────────────
-
-def test_compute_diff_detects_added_rules():
-    """Rules present in current but not previous are flagged as ADDED."""
-    added, removed, common = compute_diff(PREVIOUS_RULES, CURRENT_RULES)
-    assert "os_loginwindow_adminhostinfo_disabled" in added
-    assert "os_safari_clear_history_disable" in added
-
-
-def test_compute_diff_detects_removed_rules():
-    """Rules present in previous but not current are flagged as REMOVED."""
-    added, removed, common = compute_diff(PREVIOUS_RULES, CURRENT_RULES)
-    assert "os_dictation_disable" in removed
-    assert "system_settings_software_update_enforce" in removed
-
-
-def test_compute_diff_no_change_case():
-    """Identical rule lists should produce zero added and removed changes."""
-    added, removed, common = compute_diff(IDENTICAL_RULES, IDENTICAL_RULES)
-    assert len(added) == 0
-    assert len(removed) == 0
-    assert len(common) == len(IDENTICAL_RULES)
-
-
-def test_compute_diff_empty_both():
-    """Two empty rule lists should produce zero changes."""
-    added, removed, common = compute_diff([], [])
-    assert len(added) == 0
-    assert len(removed) == 0
-    assert len(common) == 0
+def _write_rule(
+    root: Path,
+    rule_id: str,
+    *,
+    title: str | None = None,
+    severity: str = "medium",
+    references: dict | None = None,
+    odv: dict | None = None,
+) -> None:
+    rule_path = root / "rules" / "os" / f"{rule_id}.yaml"
+    rule_path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "id": rule_id,
+        "title": title or f"Title for {rule_id}",
+        "severity": severity,
+        "references": references or {"800-53r5": ["AC-1"]},
+        "tags": ["cis_lvl1"],
+        "mobileconfig": True,
+    }
+    if odv is not None:
+        payload["odv"] = odv
+    lines = []
+    for key, value in payload.items():
+        if isinstance(value, (dict, list)):
+            lines.append(f"{key}: {json.dumps(value)}")
+        else:
+            lines.append(f'{key}: "{value}"')
+    rule_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def test_compute_diff_all_new():
-    """Going from empty to populated should flag everything as ADDED."""
-    added, removed, common = compute_diff([], CURRENT_RULES)
-    assert len(added) == len(CURRENT_RULES)
-    assert len(removed) == 0
-    assert len(common) == 0
+def _write_baseline(root: Path, filename: str, rule_sections: list[tuple[str, list[str]]]) -> None:
+    baseline_path = root / "baselines" / filename
+    baseline_path.parent.mkdir(parents=True, exist_ok=True)
+    lines = ['title: "Fixture baseline"', "profile:"]
+    for section, rules in rule_sections:
+        lines.append(f'  - section: "{section}"')
+        lines.append("    rules:")
+        for rule in rules:
+            lines.append(f"      - {rule}")
+    baseline_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-def test_compute_diff_all_removed():
-    """Going from populated to empty should flag everything as REMOVED."""
-    added, removed, common = compute_diff(PREVIOUS_RULES, [])
-    assert len(added) == 0
-    assert len(removed) == len(PREVIOUS_RULES)
-    assert len(common) == 0
+def _write_fixture_repo(root: Path) -> None:
+    root.mkdir(parents=True, exist_ok=True)
+    (root / "VERSION.yaml").write_text(
+        'os: "26.0"\nplatform: macOS\nversion: "Tahoe Guidance, Revision 3.0"\n',
+        encoding="utf-8",
+    )
+    _write_baseline(
+        root,
+        "cis_lvl1.yaml",
+        [
+            ("macos", ["stable_rule", "added_rule", "changed_rule"]),
+            ("systemsettings", ["moved_rule"]),
+        ],
+    )
+    _write_baseline(root, "DISA-STIG.yaml", [("macos", ["stig_rule"])])
+    for rule_id in ["stable_rule", "added_rule", "moved_rule", "stig_rule"]:
+        _write_rule(root, rule_id)
+    _write_rule(
+        root,
+        "changed_rule",
+        severity="high",
+        references={"800-53r5": ["AC-2"]},
+        odv={"recommended": 900},
+    )
+
+
+def _previous_state() -> dict:
+    return {
+        "schema_version": 2,
+        "branches": {"tahoe": "tahoe_rev2"},
+        "modules": {
+            "cis_lvl1/macos_26": {
+                "rules": {
+                    "stable_rule": {
+                        "title": "Title for stable_rule",
+                        "section": "macos",
+                        "metadata": {
+                            "title": "Title for stable_rule",
+                            "severity": "medium",
+                            "references": {"800-53r5": ["AC-1"]},
+                            "tags": ["cis_lvl1"],
+                            "mobileconfig": "True",
+                        },
+                        "metadata_hash": "73fbd16308ede8f46ec3890444e7a24c6001b181edef1b35d105aa6671f87fe6",
+                    },
+                    "changed_rule": {
+                        "title": "Title for changed_rule",
+                        "section": "macos",
+                        "metadata": {
+                            "title": "Title for changed_rule",
+                            "severity": "medium",
+                            "references": {"800-53r5": ["AC-1"]},
+                            "tags": ["cis_lvl1"],
+                            "mobileconfig": "True",
+                        },
+                        "metadata_hash": "old-hash",
+                    },
+                    "moved_rule": {
+                        "title": "Title for moved_rule",
+                        "section": "macos",
+                        "metadata": {
+                            "title": "Title for moved_rule",
+                            "severity": "medium",
+                            "references": {"800-53r5": ["AC-1"]},
+                            "tags": ["cis_lvl1"],
+                            "mobileconfig": "True",
+                        },
+                        "metadata_hash": "649816c91d5f15a36074a09df2e37c8e6875a8922deac8770af901ad03dd2a03",
+                    },
+                    "removed_rule": {
+                        "title": "Title for removed_rule",
+                        "section": "macos",
+                        "metadata": {"title": "Title for removed_rule"},
+                        "metadata_hash": "removed-hash",
+                    },
+                }
+            }
+        },
+    }
 
 
 def test_extract_rule_ids_from_list_profile():
-    """Current mSCP profile lists should be flattened into rule IDs."""
     baseline_data = {
         "profile": [
             {"section": "macos", "rules": ["os_gatekeeper_enable"]},
@@ -104,80 +164,126 @@ def test_extract_rule_ids_from_list_profile():
         "os_gatekeeper_enable",
         "system_settings_screensaver_timeout_enforce",
     ]
+    assert extract_profile_entries(baseline_data)[1]["section"] == "systemsettings"
 
 
 def test_extract_rule_ids_from_legacy_dict_profile():
-    """Legacy mSCP profile dictionaries should remain supported."""
     baseline_data = {
         "profile": {
             "section": [
-                {"rules": ["os_gatekeeper_enable"]},
-                {"rules": ["os_sip_enable"]},
+                {"section": "macos", "rules": ["os_gatekeeper_enable"]},
+                {"section": "auth", "rules": ["auth_smartcard_allow"]},
             ]
         }
     }
 
     assert extract_rule_ids_from_profile(baseline_data) == [
         "os_gatekeeper_enable",
-        "os_sip_enable",
+        "auth_smartcard_allow",
     ]
+    assert extract_profile_entries(baseline_data)[1]["section"] == "auth"
 
 
-# ── Test: Markdown output ──────────────────────────────────────────────
-
-def test_generate_changelog_markdown_structure():
-    """Output markdown must follow the expected PR body format."""
-    added, removed, modified = compute_diff(PREVIOUS_RULES, CURRENT_RULES)
-    
-    rule_titles = {
-        "os_gatekeeper_enable": "Enable Gatekeeper",
-        "os_sip_enable": "Enable SIP",
-        "os_loginwindow_adminhostinfo_disabled": "Disable AdminHostInfo",
-        "os_safari_clear_history_disable": "Disable Safari History",
-        "system_settings_screensaver_password_enforce": "Screensaver Password",
-        "pwpolicy_account_lockout_enforce": "Account Lockout",
+def test_compute_module_diff_reports_only_real_changes():
+    previous = {
+        "stable": _snapshot("stable"),
+        "moved": _snapshot("moved", section="old"),
+        "changed": _snapshot("changed", metadata_hash="old"),
+        "removed": _snapshot("removed"),
+    }
+    current = {
+        "stable": _snapshot("stable"),
+        "moved": _snapshot("moved", section="new"),
+        "changed": _snapshot("changed", metadata_hash="new"),
+        "added": _snapshot("added"),
     }
 
-    markdown = generate_changelog_markdown(
+    diff = compute_module_diff(
         baseline_key="cis_lvl1",
-        ver_major="26",
-        ver_meta={"name": "Tahoe", "branch": "tahoe"},
-        old_revision="tahoe_rev1",
-        new_revision="tahoe_rev2",
-        added=added,
-        removed=removed,
-        modified=modified,
-        rule_titles=rule_titles,
+        display_name="CIS Level 1",
+        macos_version="26",
+        previous_rules=previous,
+        current_rules=current,
     )
 
-    # Header with baseline name and version range
-    assert "CIS macOS Benchmark — Level 1" in markdown
-    assert "macOS 26" in markdown
-    assert "tahoe_rev1" in markdown
-    assert "tahoe_rev2" in markdown
-
-    # Markdown table header
-    assert "| Change" in markdown
-    assert "| Rule ID" in markdown or "|--------" in markdown
-
-    # Each change type should appear in the table
-    assert "ADDED" in markdown
-    assert "REMOVED" in markdown
-    assert "MODIFIED" in markdown
+    assert [rule.id for rule in diff.added] == ["added"]
+    assert [rule.id for rule in diff.removed] == ["removed"]
+    assert [rule.id for rule in diff.moved] == ["moved"]
+    assert [rule.id for rule in diff.metadata_changed] == ["changed"]
+    assert "stable" not in {rule.id for rule in diff.metadata_changed}
 
 
-def test_generate_changelog_markdown_no_changes():
-    """No-change case should produce a clear 'none' message in the table."""
-    markdown = generate_changelog_markdown(
-        baseline_key="cis_lvl1",
-        ver_major="26",
-        ver_meta={"name": "Tahoe", "branch": "tahoe"},
-        old_revision="tahoe_rev1",
-        new_revision="tahoe_rev2",
-        added=[],
-        removed=[],
-        modified=[],
-        rule_titles={},
+def test_write_changelog_outputs_with_fixture_repo(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    mscp_path = tmp_path / "mscp"
+    _write_fixture_repo(mscp_path)
+    state_path = tmp_path / ".ci" / "mscp-rule-state.json"
+    state_path.parent.mkdir()
+    state_path.write_text(json.dumps(_previous_state()), encoding="utf-8")
+
+    result = write_changelog_outputs(
+        mscp_path=mscp_path,
+        branch="tahoe",
+        full_output=None,
+        summary_output=tmp_path / "changelog-summary.md",
+        summary_limit=20_000,
     )
 
-    assert "none" in markdown.lower()
+    full_path = tmp_path / "docs" / "compliance-changelogs" / "tahoe_tahoe_rev3.md"
+    summary_path = tmp_path / "changelog-summary.md"
+    assert full_path.is_file()
+    assert summary_path.is_file()
+    assert len(summary_path.read_text(encoding="utf-8")) < 20_000
+
+    summary = summary_path.read_text(encoding="utf-8")
+    assert "Full changelog" in summary
+    assert "docs/compliance-changelogs/tahoe_tahoe_rev3.md" in summary
+    assert "CIS macOS Benchmark" in summary
+
+    full = full_path.read_text(encoding="utf-8")
+    assert "ADDED" in full
+    assert "REMOVED" in full
+    assert "MOVED" in full
+    assert "METADATA_CHANGED" in full
+    assert "Baseline State Initialized" in full
+    assert any(diff.baseline_key == "cis_lvl1" for diff in result.module_diffs)
+    assert any(diff.baseline_key == "disa_stig" for diff in result.initialized_modules)
+
+    state = json.loads(state_path.read_text(encoding="utf-8"))
+    assert state["schema_version"] == 2
+    assert state["branches"]["tahoe"] == "tahoe_rev3"
+    assert "metadata_hash" in state["modules"]["cis_lvl1/macos_26"]["rules"]["stable_rule"]
+
+
+def test_large_summary_stays_under_limit(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    mscp_path = tmp_path / "mscp"
+    _write_fixture_repo(mscp_path)
+    rules = [f"added_rule_{idx}" for idx in range(300)]
+    _write_baseline(mscp_path, "cis_lvl2.yaml", [("macos", rules)])
+    for rule_id in rules:
+        _write_rule(mscp_path, rule_id)
+
+    write_changelog_outputs(
+        mscp_path=mscp_path,
+        branch="tahoe",
+        full_output=None,
+        summary_output=tmp_path / "changelog-summary.md",
+        summary_limit=4_000,
+    )
+
+    assert len((tmp_path / "changelog-summary.md").read_text(encoding="utf-8")) <= 4_000
+
+
+def test_workflow_uses_summary_body_and_full_changelog_artifact():
+    workflow = Path(".github/workflows/compliance-update.yml").read_text(
+        encoding="utf-8"
+    )
+
+    assert "--summary-output changelog-summary.md" in workflow
+    assert "body-path: changelog-summary.md" in workflow
+    assert "--output changelog.md" not in workflow
+    assert "test -f .ci/mscp-revision-state.json" in workflow
+    assert "test -f .ci/mscp-rule-state.json" in workflow
+    assert "test -f changelog-summary.md" in workflow
+    assert "docs/compliance-changelogs" in workflow
