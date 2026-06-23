@@ -30,7 +30,7 @@ jobs:
       sequoia_tag: ${{ steps.detect.outputs.sequoia_tag }}
       tahoe_tag: ${{ steps.detect.outputs.tahoe_tag }}
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
 
       - name: Setup Python
         uses: actions/setup-python@v6
@@ -73,7 +73,7 @@ for branch, tag in data.get('branches', {}).items():
     runs-on: ubuntu-latest
     container: ghcr.io/usnistgov/mscp_2.0:latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           ref: ${{ github.head_ref }}
 
