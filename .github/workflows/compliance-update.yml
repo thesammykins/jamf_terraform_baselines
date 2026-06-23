@@ -64,6 +64,12 @@ for branch, tag in data.get('branches', {}).items():
     print(f'{branch}_tag={tag}')
 " >> $GITHUB_OUTPUT
 
+      - name: Upload revision state
+        uses: actions/upload-artifact@v4
+        with:
+          name: mscp-revision-state
+          path: .ci/mscp-revision-state.json
+
   generate:
     needs: detect-releases
     if: needs.detect-releases.outputs.branches != '[]'
@@ -76,6 +82,12 @@ for branch, tag in data.get('branches', {}).items():
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.head_ref }}
+
+      - name: Download revision state
+        uses: actions/download-artifact@v4
+        with:
+          name: mscp-revision-state
+          path: .ci
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v4
